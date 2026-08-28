@@ -44,9 +44,15 @@ export const roadMat = new THREE.ShaderMaterial({
   fragmentShader: BENT_FRAG,
   vertexColors: true,
   side: THREE.DoubleSide,
+  /* Pushed well back in depth. At the fold the pavement pads' own tessellation
+     is coarse relative to the curve, so their chords can cut a good half-unit
+     through this mesh and show as white slivers along the horizon. Offsetting
+     the road rather than subdividing the pads fixes it for one line instead of
+     doubling the tile's geometry, and the road is the bottom layer anyway —
+     there is nothing underneath it to lose to. */
   polygonOffset: true,
-  polygonOffsetFactor: 2,
-  polygonOffsetUnits: 2
+  polygonOffsetFactor: 6,
+  polygonOffsetUnits: 6
 });
 
 /** Anything at the local origin — the truck — never bends. */

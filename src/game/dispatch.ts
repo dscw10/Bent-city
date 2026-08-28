@@ -97,6 +97,13 @@ export class Dispatch {
     this.closureTimer = 0;
     this.pressure = 1;
     this.rollClosures(mode.closures);
+
+    // Seed the board. Starting empty means the first few seconds of a shift
+    // have nothing to read and nowhere to go, which is the worst possible
+    // introduction to a game whose whole pitch is choosing between drops.
+    for (let i = 0; i < Math.min(2, mode.maxOrders); i++) {
+      this.spawnOrder(nodePos(4), nodePos(4));
+    }
   }
 
   /** Difficulty ramp, driven by the game's elapsed time. */

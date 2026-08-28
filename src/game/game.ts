@@ -120,10 +120,15 @@ export class Game {
     persist();
   }
 
-  /** True if this run set a new best for its mode. */
-  commitScore(): boolean {
-    if (this.mode.duration === 0) return false;   // free roam is not a score
-    return recordScore(this.mode.id, this.stats.yen);
+  /**
+   * Record the run. Returns the previous best and whether it was beaten —
+   * the previous number has to be read before it is overwritten, and the
+   * results screen wants to show it.
+   */
+  commitScore(): { previous: number; isBest: boolean } {
+    if (this.mode.duration === 0) return { previous: 0, isBest: false }; // roam is not a score
+    const previous = save.best[this.mode.id] ?? 0;
+    return { previous, isBest: recordScore(this.mode.id, this.stats.yen) };
   }
 
   /**

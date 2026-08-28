@@ -153,8 +153,8 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matc
 .mode .dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--shadow);
   margin-top:3px;flex:none}
 .mode.sel .dot{background:var(--matcha);border-color:var(--matcha)}
-.mode .name{font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
-.mode .desc{font-size:11px;line-height:1.5;color:#5B646C;margin-top:3px}
+.mode .name{display:block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+.mode .desc{display:block;font-size:11px;line-height:1.5;color:#5B646C;margin-top:4px}
 
 .setting{display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:9px 0;border-bottom:1px solid rgba(154,163,171,.3)}
@@ -188,11 +188,21 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matc
 .keys{font-size:10px;letter-spacing:.1em;color:var(--shadow);margin-top:10px;line-height:1.7}
 .keys b{color:var(--ink);letter-spacing:.16em}
 
+/* On a narrow screen the centred button row lands straight on top of the
+   clock, which is the one readout you cannot afford to lose. Stack the buttons
+   down the right instead, under the score, where nothing else lives. */
+@media (max-width:560px){
+  .topbar{left:auto;right:16px;top:calc(96px + var(--safe-t));transform:none;
+    flex-direction:column;align-items:flex-end}
+  .chip{padding:6px 9px;font-size:9px}
+}
 @media (max-width:420px){
   .manifest{width:150px;top:calc(92px + var(--safe-t))}
   .val{font-size:28px}
   .sheet h1{font-size:38px}
   .bigscore{font-size:54px}
+  .task .what{font-size:11px;letter-spacing:.16em}
+  .task .dist{font-size:10px}
 }
 /* On a short landscape phone the joystick and the manifest collide. */
 @media (max-height:520px){

@@ -124,7 +124,7 @@ function toMenu(): void {
 function showResults(): void {
   audio.finish();
   const s = game.stats;
-  const isBest = game.commitScore();
+  const { previous, isBest } = game.commitScore();
   const rows: ResultRow[] = [
     { label: 'Delivered', value: String(s.deliveries) },
     { label: 'Longest streak', value: String(s.bestStreak) },
@@ -135,8 +135,8 @@ function showResults(): void {
       value: `${Math.floor(s.elapsed / 60)}:${String(Math.floor(s.elapsed % 60)).padStart(2, '0')}`
     }
   ];
-  if (isBest) {
-    rows.unshift({ label: 'Previous best beaten', value: 'yes', highlight: true });
+  if (isBest && previous > 0) {
+    rows.unshift({ label: 'Previous best', value: `¥${previous.toLocaleString('en-GB')}`, highlight: true });
   }
   screens.showResult(isBest ? 'New best shift' : 'Shift over', s.yen, rows);
   setPlayingChrome(false);
@@ -257,6 +257,19 @@ requestAnimationFrame(tick);
 
 // Dev-only inspection hooks, stripped from production builds by Vite.
 if (import.meta.env.DEV) {
+  // Put the truck on whatever it is currently being routed to. Software
+  // rendering runs at a fifth of real time, so driving a full shift in a
+  // headless browser is not a practical way to test the delivery chain.
+  (window as unknown as Record<string, unknown>).__warp = () => {
+    const f = game.focus(car);
+    resetCar(car, f.x, f.z, car.a);
+    return f;
+  };
+  // Wind the shift clock down, to reach the results screen without waiting.
+  (window as unknown as Record<string, unknown>).__setClock = (s: number) => {
+    game.clock = s;
+  };
+
   // Measures the real RMS on the master bus, so "is there actually sound"
   // can be answered without a person and a pair of headphones.
   let analyser: AnalyserNode | null = null;
@@ -284,6 +297,8 @@ if (import.meta.env.DEV) {
     traffic: game.traffic.cars.length,
     peds: game.pedestrians.list.length,
     car: [Math.round(car.x), Math.round(car.z)],
+    heading: car.a,
+    stats: { ...game.stats, yen: game.stats.yen, clock: Math.round(game.clock) },
     focus: game.focus(car),
     routeLen: (game as unknown as { route: unknown[] }).route.length,
     markVerts: world.marks.builder.p.length / 3,

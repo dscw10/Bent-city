@@ -63,7 +63,7 @@ function tower(ctx: BlockContext, x: number, z: number, w: number, d: number, h:
 
 export function park(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.08, C.park, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.08, C.park, 8);
 
   // Crossing paths, which give the plan view a legible mark and the street view
   // something other than a green rectangle.
@@ -84,7 +84,7 @@ export function park(ctx: BlockContext): void {
 
 export function lot(ctx: BlockContext): void {
   const { b, cx, cz } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.07, C.lot, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.07, C.lot, 8);
   for (let r = 0; r < 5; r++) {
     const zz = cz - BLOCK / 2 + BLOCK * (r + 0.5) / 5;
     for (let c = 0; c < 7; c++) {
@@ -97,7 +97,7 @@ export function lot(ctx: BlockContext): void {
 
 export function superblock(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
   const h = 34 + rnd() * 46;
   const w = BLOCK * 0.80;
   ctx.push({ x: cx, z: cz, w, d: w });
@@ -109,7 +109,7 @@ export function superblock(ctx: BlockContext): void {
 
 export function buildings(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
 
   const n = 1 + ((rnd() * 4) | 0);
   const cells: Array<[number, number]> = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
@@ -134,7 +134,7 @@ export function buildings(ctx: BlockContext): void {
  */
 export function market(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
   const cell = BLOCK * 0.28;
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
@@ -156,7 +156,7 @@ export function market(ctx: BlockContext): void {
  */
 export function podium(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
   const pw = BLOCK * 0.86;
   const th = 46 + rnd() * 40;
   ctx.push({ x: cx, z: cz, w: pw, d: pw });
@@ -173,7 +173,7 @@ export function podium(ctx: BlockContext): void {
  */
 export function shrine(ctx: BlockContext): void {
   const { b, cx, cz } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, [0.84, 0.83, 0.80], 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, [0.84, 0.83, 0.80], 8);
   // Gravel approach, laid as a cross.
   b.slab(cx, cz, BLOCK * 0.9, 6.5, 0.12, [0.90, 0.89, 0.86], 6);
   b.slab(cx, cz, 6.5, BLOCK * 0.9, 0.12, [0.90, 0.89, 0.86], 6);
@@ -198,7 +198,7 @@ export function shrine(ctx: BlockContext): void {
  */
 export function works(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.08, [0.78, 0.76, 0.72], 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.08, [0.78, 0.76, 0.72], 8);
 
   const h = BLOCK * 0.42;
   for (const [dx, dz, w, d] of [
@@ -226,7 +226,7 @@ export function works(ctx: BlockContext): void {
  */
 export function dock(ctx: BlockContext): void {
   const { b, cx, cz } = ctx;
-  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 6);
+  b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
   const w = BLOCK * 0.78;
   b.slab(cx, cz, w, w, 0.05, [0.50, 0.56, 0.62], 8);
   // One collision box over the water. The pavement ring around it stays open,

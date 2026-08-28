@@ -49,9 +49,11 @@ export class Screens {
   showTitle(): void {
     this.setOnly(this.title);
     const best = save.best[this.selected.id] ?? 0;
+    const n = save.totalDeliveries;
+    const tally = `${n} ${n === 1 ? 'delivery' : 'deliveries'} all told`;
     el('titleBest').textContent = best > 0
-      ? `Best ${this.selected.name.toLowerCase()} — ¥${best.toLocaleString('en-GB')} · ${save.totalDeliveries} deliveries all told`
-      : `${save.totalDeliveries} deliveries all told`;
+      ? `Best ${this.selected.name.toLowerCase()} — ¥${best.toLocaleString('en-GB')} · ${tally}`
+      : tally;
   }
 
   showPause(modeName: string): void {

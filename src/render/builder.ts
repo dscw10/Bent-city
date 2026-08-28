@@ -76,8 +76,12 @@ export class Builder {
     const z0 = cz - sz / 2, z1 = cz + sz / 2;
     const A: V2 = [cx, cz];
 
-    // Subdivision only matters inside the transition band, so keep it modest.
-    const sz_ = segZ ?? Math.max(2, Math.round(sz / 8));
+    /* Subdivision along z is what the fold actually consumes. The fold spans
+       R·π/2 ≈ 20 units at the default curl radius, so segments coarser than a
+       few units across leave visible facets and spikes right on the horizon,
+       which is the most looked-at line in the game. Dropping the pointless
+       vertical subdivision below bought the budget to make this finer. */
+    const sz_ = segZ ?? Math.max(3, Math.round(sz / 5));
     const sx_ = Math.max(2, Math.round(sx / 8));
 
     /* VERTICAL SUBDIVISION IS ALWAYS 1, and it is worth knowing why.

@@ -123,9 +123,23 @@ export function buildCity(scene: THREE.Scene): CityData {
  * ground plane needed.
  */
 export function buildRoadSurface(scene: THREE.Scene): void {
-  const XS = 64, ZS = 260, X = 1200, ZA = -90, ZB = 1400, POW = 2.2;
+  const XS = 72, ZS = 260, X = 1200, ZA = -90, ZB = 1400, POW = 2.2, POWX = 2.4;
   const p: number[] = [], n: number[] = [], c: number[] = [];
+
   const zAt = (u: number) => ZA + (ZB - ZA) * Math.pow(u, POW);
+
+  /* Lateral subdivision is packed toward the centre with the same trick.
+     It used to be uniform, which put 37 units between columns — and over that
+     span the mesh's straight-line approximation of the hillside rises about
+     0.14 units, while a pavement pad only floats 0.03 above the ground. The
+     road was poking up THROUGH the pavements, and it showed as a sawtooth
+     along every kerb. Packing the columns toward the truck drops the error
+     where it is visible to almost nothing, and leaves it coarse only far out
+     to the sides where the map compression has squashed it anyway. */
+  const xAt = (u: number) => {
+    const s = u * 2 - 1;
+    return Math.sign(s) * X * Math.pow(Math.abs(s), POWX);
+  };
 
   const tri = (a: number[], b_: number[], c_: number[]) => {
     p.push(...a, ...b_, ...c_);
@@ -133,7 +147,7 @@ export function buildRoadSurface(scene: THREE.Scene): void {
   };
 
   for (let i = 0; i < XS; i++) {
-    const x0 = -X + 2 * X * i / XS, x1 = -X + 2 * X * (i + 1) / XS;
+    const x0 = xAt(i / XS), x1 = xAt((i + 1) / XS);
     for (let j = 0; j < ZS; j++) {
       const z0 = zAt(j / ZS), z1 = zAt((j + 1) / ZS);
       tri([x0, 0, z0], [x1, 0, z1], [x1, 0, z0]);
