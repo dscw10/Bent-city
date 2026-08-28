@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Melonpan Delivery Service</title>
+<style>
+  :root{
+    --paper:#EDEFF1;      /* sky / negative space */
+    --concrete:#FFFFFF;   /* building faces */
+    --shadow:#9AA3AB;     /* cool grey shade */
+    --asphalt:#C8CDD2;    /* road */
+    --ink:#12161A;        /* text */
+    --matcha:#7FA650;     /* the one accent */
+    --melon:#E8C87A;      /* melonpan crust */
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--paper);
+    font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:var(--ink);
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  #stage{position:fixed;inset:0}
+  canvas{display:block}
+
+  /* ---- HUD ---- */
+  .hud{position:fixed;inset:0;pointer-events:none;padding:16px}
+  .row{display:flex;justify-content:space-between;align-items:flex-start}
+  .lbl{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--shadow);margin-bottom:2px}
+  .val{font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+  .val.small{font-size:22px}
+  .task{position:fixed;left:16px;right:16px;bottom:194px;text-align:center}
+  .task .what{font-size:13px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+  .task .dist{font-size:11px;letter-spacing:.18em;color:var(--shadow);margin-top:4px}
+  .accent{color:var(--matcha)}
+  .flash{position:fixed;inset:0;background:var(--matcha);opacity:0;transition:opacity .35s;
+    pointer-events:none}   /* <- without this it swallows every tap on the screen */
+
+  /* ---- twin joysticks ---- */
+  .sticks{position:fixed;left:0;right:0;bottom:0;height:180px;
+    display:flex;justify-content:center;align-items:flex-end;
+    padding:0 20px 26px;pointer-events:none}
+  .stick{position:relative;width:148px;height:148px;border-radius:50%;
+    border:1.5px solid var(--shadow);background:rgba(255,255,255,.28);
+    backdrop-filter:blur(4px);pointer-events:auto;touch-action:none}
+  .stick .axis{position:absolute;background:var(--shadow);opacity:.45}
+  .stick .axis.h{left:16%;right:16%;top:50%;height:1px}
+  .stick .axis.v{top:16%;bottom:16%;left:50%;width:1px}
+  .knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;
+    border-radius:50%;background:var(--matcha);border:2.5px solid var(--ink);
+    transition:transform .12s ease-out}
+  .stick.live .knob{transition:none}
+  .cap{position:absolute;left:0;right:0;bottom:-19px;text-align:center;
+    font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--shadow);font-weight:600}
+
+  /* ---- tuner ---- */
+  #tuneBtn{position:fixed;top:16px;left:50%;transform:translateX(-50%);pointer-events:auto;
+    border:1.5px solid var(--ink);border-radius:2px;background:rgba(255,255,255,.6);
+    padding:7px 12px;font-size:10px;letter-spacing:.2em;font-weight:600;text-transform:uppercase;cursor:pointer}
+  #tuner{position:fixed;top:56px;left:50%;transform:translateX(-50%);width:min(320px,calc(100% - 32px));
+    max-height:calc(100vh - 260px);overflow-y:auto;-webkit-overflow-scrolling:touch;
+    background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border:1.5px solid var(--ink);
+    padding:14px;display:none;pointer-events:auto}
+  #tuner.on{display:block}
+  .ctrl{margin-bottom:12px}
+  .ctrl:last-child{margin-bottom:0}
+  .ctrl label{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--shadow);margin-bottom:6px}
+  .ctrl label b{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;-webkit-appearance:none;background:transparent}
+  input[type=range]::-webkit-slider-runnable-track{height:1.5px;background:var(--ink)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+    background:var(--matcha);border-radius:50%;margin-top:-7px}
+  input[type=range]::-moz-range-track{height:1.5px;background:var(--ink)}
+  input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matcha);border:0;border-radius:50%}
+  .hint{font-size:10px;line-height:1.5;color:var(--shadow);letter-spacing:.04em;margin-top:10px}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div class="hud">
+  <div class="row">
+    <div><div class="lbl">Speed</div><div class="val" id="speed">0</div></div>
+    <div style="text-align:right"><div class="lbl">Delivered</div><div class="val" id="score">0</div></div>
+  </div>
+  <div class="task">
+    <div class="what" id="what">Collect the melonpan</div>
+    <div class="dist" id="dist">—</div>
+  </div>
+</div>
+
+<div class="sticks">
+  <div class="stick" id="stickL">
+    <div class="axis h"></div><div class="axis v"></div><div class="knob"></div>
+    <div class="cap">Steer · Throttle · Brake</div>
+  </div>
+</div>
+
+<button id="tuneBtn">Tune the bend</button>
+<div id="tuner">
+  <div class="ctrl">
+    <label>Bend start <b id="v0">70</b></label>
+    <input type="range" id="s0" min="8" max="200" value="70" step="1">
+  </div>
+  <div class="ctrl">
+    <label>Curl radius <b id="v1">13</b></label>
+    <input type="range" id="s1" min="5" max="120" value="13" step="1">
+  </div>
+  <div class="ctrl">
+    <label>Map scale <b id="v3">0.34</b></label>
+    <input type="range" id="s3" min="0.12" max="1" value="0.34" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Speed push <b id="v6">120</b></label>
+    <input type="range" id="s6" min="0" max="240" value="120" step="1">
+  </div>
+  <div class="ctrl">
+    <label>Fold easing <b id="v5">1.00</b></label>
+    <input type="range" id="s5" min="0" max="1" value="1" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Map flatten <b id="v4">0.06</b></label>
+    <input type="range" id="s4" min="0" max="0.6" value="0.06" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Map falloff <b id="v7">0.51</b></label>
+    <input type="range" id="s7" min="0" max="1" value="0.51" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Building height <b id="v8">0.31</b></label>
+    <input type="range" id="s8" min="0.1" max="1.4" value="0.31" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Map lock <b id="v9">0.10</b></label>
+    <input type="range" id="s9" min="0" max="1" value="0.10" step="0.01">
+  </div>
+  <div class="ctrl">
+    <label>Camera distance <b id="v2">11</b></label>
+    <input type="range" id="s2" min="5" max="46" value="11" step="0.5">
+  </div>
+  <div class="hint"><b>Bend start</b> — the life-size street ahead of you <i>at a standstill</i>.<br>
+  <b>Speed push</b> — how much further out the bend start travels at full speed. 0 freezes the view; high values give you a long road when you're moving and a wide map when you're not.<br>
+  <b>Curl radius</b> — how tightly the world folds up. Small = a sharp horizon.<br>
+  <b>Map scale</b> — 1.00 is life size; drop it and the fold shrinks the world as it lifts, so the map covers far more ground.<br>
+  <b>Fold easing</b> — 0.00 is a constant-radius arc, which reads as a chamfered edge. 1.00 eases curvature in and out from zero, like a clothoid on a motorway slip road.<br>
+  <b>Map flatten</b> — how much building height survives onto the map. 0.00 lays them perfectly flat; nudge it up for a raised-relief look. Turn it to 0.60 to see the problem it solves.<br>
+  <b>Map falloff</b> — compresses distance the higher up the map you go, so the far end of the route folds into finite screen height. 0.00 is a linear map.<br>
+  <b>Building height</b> — global scale. Lower buildings mean less of the map hidden behind them.<br>
+  <b>Map lock</b> — 0.00 turns the map with you. 1.00 world-locks it so north stays north and only the transition band twists. In between, the map swings lazily behind your turns.<br>
+  <b>Camera distance</b> — pulls back and up along one diagonal.</div>
+</div>
+
+<div class="flash" id="flash"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =========================================================================
+   BENT — a delivery driving prototype
+   The whole idea lives in ONE vertex shader (see bendGLSL below):
+   the camera is completely ordinary; the WORLD curls upward ahead of you.
+   Near the car you get street-level perspective (tactical).
+   Far ahead the ground has rotated 90 degrees and reads as a map (strategic).
+   ========================================================================= */
+
+// ---------- tuning ----------
+const P = {
+  z0: 70,        // distance ahead where the curl begins (bigger = more street)
+  R : 13,        // radius of the curl (small = tighter fold = more map)
+  kMin: 0.34,    // map scale: 1.0 = life size, 0.3 = zoomed way out
+  flat: 0.06,    // residual building height on the map (0 = perfectly flat)
+  ease: 1.00,    // 0 = circular arc (chamfer), 1 = fully progressive fold
+  fall: 0.51,    // 0 = linear map, 1 = strong compression toward the top
+  buildH: 0.31,  // global building height scale (lower = more map visible)
+  lock: 0.10,    // 0 = map turns with the car, 1 = map world-locked
+  push: 120,     // how far speed pushes the bend start out (0 = static view)
+  vMax: 55,      // reference top speed for the speed response
+  camDist: 11,   // camera pulls back and up along one diagonal
+  fogStart: 240, // base values only — the loop overrides these from Map falloff
+  fogEnd: 490
+};
+
+// ---------- city layout ----------
+// The city is one TILE, repeated 3x3 around the player. The player's position is
+// wrapped into the home tile every frame, so the surrounding copies never move
+// and the world feels endless. The nav route is drawn ONCE, in the home tile only.
+const GRID = 9;        // intersections per tile
+const PITCH = 58;      // distance between intersections
+const ROADW = 14;      // road width
+const BLOCK = PITCH - ROADW;
+const nodePos = i => i * PITCH;
+const TILE = GRID * PITCH;               // 522 — the repeat distance
+const wrap = v => ((v % TILE) + TILE) % TILE;
+const smooth = t => t*t*(3-2*t);
+
+/* ---------- terrain ----------
+   The world's height is a FUNCTION. Geometry and the suspension rays read the
+   same one, so they can never disagree.
+
+   NOTE, learned the hard way: terrain height must NOT be scaled by uBuildH.
+   That uniform scales BUILDING height for map legibility, and the first attempt
+   at elevated roads let it scale the deck too — so the deck rendered at a third
+   of its height while the physics kept it at full height, and the truck floated
+   above a road that wasn't where it looked. Anything the car drives ON is added
+   AFTER uBuildH in the shader, never before. */
+const TA = 5.5, TB = 3.0, TC = 1.8;        // hill amplitudes — must match the GLSL
+const TK = 2*Math.PI / TILE;               // periodic over one tile, so it wraps
+
+function terrainAt(x,z){
+  return TA * Math.sin(TK*x)       * Math.cos(TK*z)
+       + TB * Math.sin(2*TK*x+1.7) * Math.sin(TK*z+0.4)
+       + TC * Math.cos(3*TK*x)     * Math.cos(2*TK*z+2.1);
+}
+
+// slope of the ground, for the gravity component that makes hills cost you speed
+function slopeAt(x,z){
+  return [ (terrainAt(x+1,z) - terrainAt(x-1,z)) * 0.5,
+           (terrainAt(x,z+1) - terrainAt(x,z-1)) * 0.5 ];
+}
+
+
+// ---------- palette (linear-ish rgb 0..1) ----------
+const C = {
+  face   : [0.98, 0.98, 0.99],
+  face2  : [0.90, 0.91, 0.93],
+  roof   : [0.80, 0.82, 0.85],
+  road   : [0.76, 0.78, 0.81],
+  kerb   : [0.88, 0.89, 0.91],
+  park   : [0.72, 0.79, 0.75],
+  dash   : [1.0, 1.0, 1.0],
+  matcha : [0.50, 0.65, 0.31],
+  melon  : [0.91, 0.78, 0.48],
+  deck   : [0.83, 0.85, 0.86],
+  lot    : [0.80, 0.81, 0.83],
+  deckS  : [0.68, 0.70, 0.73],
+  ink    : [0.07, 0.09, 0.10]
+};
+
+/* ============================ geometry builder ============================
+   Everything that bends is baked into a few big buffers with vertex colours,
+   so the GPU only gets a handful of draw calls.
+
+   Each vertex also carries an ANCHOR: the x,z the shader samples terrain height
+   at. Pass no anchor and each vertex uses its own position, so the surface
+   drapes over the hills — that's what roads, pavements and lane markings want.
+   Pass an anchor and every vertex lifts by the SAME amount, so the shape stays
+   rigid and vertical — that's what buildings want, because they should stand up
+   in the direction of gravity rather than lean with the hillside. */
+function Builder(){ this.p=[]; this.n=[]; this.c=[]; this.a=[]; }
+Builder.prototype.quad = function(a,b,c,d,su,sv,col,anc){
+  // a,b,c,d are corners in order; subdivided su x sv so the bend is smooth
+  const nx = (b[1]-a[1])*(d[2]-a[2])-(b[2]-a[2])*(d[1]-a[1]);
+  const ny = (b[2]-a[2])*(d[0]-a[0])-(b[0]-a[0])*(d[2]-a[2]);
+  const nz = (b[0]-a[0])*(d[1]-a[1])-(b[1]-a[1])*(d[0]-a[0]);
+  const l = Math.hypot(nx,ny,nz)||1;
+  const N=[nx/l,ny/l,nz/l];
+  const lerp=(u,v,t)=>[u[0]+(v[0]-u[0])*t, u[1]+(v[1]-u[1])*t, u[2]+(v[2]-u[2])*t];
+  for(let i=0;i<su;i++){
+    for(let j=0;j<sv;j++){
+      const u0=i/su,u1=(i+1)/su,v0=j/sv,v1=(j+1)/sv;
+      const pt=(u,v)=>lerp(lerp(a,b,u), lerp(d,c,u), v);
+      const q=[pt(u0,v0),pt(u1,v0),pt(u1,v1),pt(u0,v1)];
+      const tri=(x,y,z)=>{ this.p.push(...x,...y,...z);
+        for(const v of [x,y,z]){ this.n.push(...N); this.c.push(...col);
+          this.a.push(anc ? anc[0] : v[0], anc ? anc[1] : v[2]); } };
+      tri(q[0],q[1],q[2]); tri(q[0],q[2],q[3]);
+    }
+  }
+};
+Builder.prototype.box = function(cx,cz,sx,sy,sz,col,roofCol,segZ,baseY){
+  const y0=baseY||0, y1=y0+sy;
+  const x0=cx-sx/2,x1=cx+sx/2,z0=cz-sz/2,z1=cz+sz/2;
+  const A=[cx,cz];                 // one anchor for the whole box: it stays upright
+  const sh = c => [c[0]*0.86,c[1]*0.88,c[2]*0.90];        // side shade
+  // subdivision only matters inside the transition band, so keep it modest
+  const sz_ = segZ||Math.max(2,Math.round(sz/8));
+  const sx_ = Math.max(2,Math.round(sx/8));
+  const sy_ = Math.max(2,Math.round(sy/10));
+  // +z / -z faces
+  this.quad([x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1],sx_,sy_,col,A);
+  this.quad([x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0],sx_,sy_,col,A);
+  // +x / -x faces
+  this.quad([x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1],sz_,sy_,sh(col),A);
+  this.quad([x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0],sz_,sy_,sh(col),A);
+  // roof
+  this.quad([x0,y1,z1],[x1,y1,z1],[x1,y1,z0],[x0,y1,z0],sx_,sz_,roofCol||C.roof,A);
+};
+Builder.prototype.slab = function(cx,cz,sx,sz,y,col,seg){
+  // no anchor: slabs drape over the terrain, which is what roads and pavements want
+  const s=seg||Math.max(2,Math.round(Math.max(sx,sz)/5));
+  this.quad([cx-sx/2,y,cz+sz/2],[cx+sx/2,y,cz+sz/2],[cx+sx/2,y,cz-sz/2],[cx-sx/2,y,cz-sz/2],s,s,col);
+};
+Builder.prototype.toGeometry = function(){
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(this.p,3));
+  g.setAttribute('normal',  new THREE.Float32BufferAttribute(this.n,3));
+  g.setAttribute('color',   new THREE.Float32BufferAttribute(this.c,3));
+  g.setAttribute('aAnchor', new THREE.Float32BufferAttribute(this.a,2));
+  return g;
+};
+
+/* ============================== THE BEND ==============================
+   In player-local space (+Z straight ahead, +Y up):
+     z <  z0        -> untouched. Ordinary perspective. This is your street.
+     z >= z0        -> the ground follows a circular arc of radius R that
+                       rotates it up to 90 degrees. Arc length is preserved,
+                       so the road never stretches or compresses.
+     past 90 deg    -> continues straight up as a flat vertical plane, which
+                       the camera reads as a top-down map.
+   Height h above the ground is pushed along the arc's normal, so buildings
+   in the far field lean back and present their roofs to you.            */
+const bendGLSL = `
+  #define HALFPI 1.5707963
+
+  // Scale ramp: 1.0 (life size, at the car) -> uKmin (zoomed out, on the map).
+  // Smoothstep so there's no visible crease at either end of the fold.
+  float kOf(float t){ return mix(1.0, uKmin, t*t*(3.0-2.0*t)); }
+
+  // Fold angle. A plain circular arc (uEase = 0) turns at a CONSTANT rate, so
+  // curvature jumps from zero to 1/R the instant the fold begins — the eye reads
+  // that discontinuity as a chamfered edge. Easing toward smootherstep ramps
+  // curvature in and out from zero, which is what road and rail engineers use a
+  // clothoid for. uEase = 1 gives the fully progressive version.
+  float phiOf(float t){
+    float sm = t*t*t*(t*(t*6.0 - 15.0) + 10.0);
+    return HALFPI * mix(t, sm, uEase);
+  }
+
+  vec3 bend(vec3 p, float z0, float R){
+    float s = p.z - z0;
+    if(s <= 0.0) return p;                 // near field: untouched, life size
+
+    float sB  = R * HALFPI;                // raw distance the fold occupies
+    float t   = min(s / sB, 1.0);
+    float phi = phiOf(t);                  // fold angle: 0 -> 90 degrees
+    float k   = kOf(t);                    // local scale at this point
+
+    float x = p.x * k;                     // lateral shrink
+
+    // Height flattening. Buildings stand up in the near field, then lie down
+    // through the fold so they arrive on the map as footprints, not as towers
+    // pointing at the camera. uFlat is the residual height left on the map —
+    // 0.0 is perfectly flat, a little more keeps a readable extruded edge.
+    float fl = mix(1.0, uFlat, t*t*(3.0-2.0*t));
+    float h  = p.y * k * fl;
+
+    vec2 pos;                              // (along, up) on the folded curve
+    if(s < sB){
+      // Walk the curve. Each step advances by k*ds, so the world is being
+      // progressively shrunk WHILE it folds — that's the scale correction.
+      vec2 acc = vec2(0.0);
+      float ds = s / 16.0;
+      for(int i = 0; i < 16; i++){
+        float sm = (float(i) + 0.5) * ds;
+        float tm = sm / sB;
+        float pm = phiOf(tm);
+        acc += kOf(tm) * vec2(cos(pm), sin(pm)) * ds;
+      }
+      pos = acc;
+    } else {
+      // Past the fold. uFallA compresses distance logarithmically the higher up
+      // the map you go, so the far reaches of the route fold into finite screen
+      // height. Large uFallA = no compression (straight linear map).
+      float e = s - sB;
+      float comp = uFallA * log(1.0 + e / uFallA);
+      pos = uBendEnd + vec2(0.0, uKmin * comp);
+    }
+
+    return vec3(x,
+                pos.y + h * cos(phi),
+                z0 + pos.x - h * sin(phi));
+  }`;
+
+const VERT = `
+  // NOTE: do NOT declare "attribute vec3 color" here.
+  // three.js injects it automatically because vertexColors:true is set on the
+  // material. Declaring it again is a shader compile error ('color: redefinition').
+  attribute vec2 aAnchor;
+  uniform mat4 uW2P;      // world -> player-local (LAGGED heading)
+  uniform mat4 uP2W;      // and back again, for locally-authored meshes
+  uniform float uLocal;   // 1.0 if this mesh is authored in player-local space
+  uniform float uZ0, uR, uKmin, uFlat, uEase, uFallA, uBuildH;
+  uniform float uDelta, uRampA, uRampB, uFogStart, uFogEnd;
+  uniform vec2 uBendEnd;  // where the fold ends, precomputed on the CPU
+  uniform vec3 uTerr;     // hill amplitudes
+  uniform float uTK;      // hill frequency
+  varying vec3 vColor; varying vec3 vN; varying float vFog;
+  ${bendGLSL}
+
+  // must match terrainAt() in the JS exactly, or the truck drives on a ghost
+  float terrainAt(vec2 p){
+    return uTerr.x * sin(uTK*p.x)         * cos(uTK*p.y)
+         + uTerr.y * sin(2.0*uTK*p.x+1.7) * sin(uTK*p.y+0.4)
+         + uTerr.z * cos(3.0*uTK*p.x)     * cos(2.0*uTK*p.y+2.1);
+  }
+
+  void main(){
+    vec4 world = modelMatrix * vec4(position,1.0);
+    // locally-authored meshes must be pushed back out to world space to find
+    // out which bit of hillside they are sitting on
+    vec2 anc = uLocal > 0.5 ? (uP2W * world).xz : aAnchor;
+
+    /* uBuildH scales BUILDING height ONLY. Terrain is added afterwards, at full
+       size, because the physics reads it unscaled. Getting this order wrong is
+       exactly what broke the elevated roads. */
+    world.y = position.y * uBuildH + terrainAt(anc);
+
+    vec3 local = (uW2P * world).xyz;
+
+    /* Map orientation. uW2P aligns everything to a lagged heading; uDelta is how
+       far the car has turned since. Rotating the NEAR field back by uDelta keeps
+       the chase view car-relative, while the far field stays where the lagged
+       heading left it. The ramp is on radial distance, which is rotation-
+       invariant — so there's no circular dependency. With the lag at maximum the
+       map is world-locked and only the transition band twists. */
+    float rr  = length(local.xz);
+    float b   = smoothstep(uRampA, uRampB, rr);
+    float ang = uDelta * (1.0 - b);
+    float ca  = cos(ang), sa = sin(ang);
+    local = vec3(ca*local.x - sa*local.z, local.y, sa*local.x + ca*local.z);
+
+    vFog = smoothstep(uFogStart, uFogEnd, local.z);
+    vColor = color;
+    // lighting uses the UNBENT world normal, so shading stays stable
+    vN = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * viewMatrix * vec4(bend(local, uZ0, uR), 1.0);
+  }`;
+
+const FRAG = `
+  precision highp float;
+  uniform vec3 uPaper; uniform vec3 uLight;
+  varying vec3 vColor; varying vec3 vN; varying float vFog;
+  void main(){
+    float d = max(dot(normalize(vN), normalize(uLight)), 0.0);
+    float sky = 0.5 + 0.5 * normalize(vN).y;          // hemisphere fill
+    vec3 col = vColor * (0.42 + 0.34*d + 0.24*sky);
+    col = mix(col, uPaper, vFog);
+    gl_FragColor = vec4(col, 1.0);
+  }`;
+
+// ---------- three.js setup ----------
+const paper = new THREE.Color(0xEDEFF1);
+const scene = new THREE.Scene();
+scene.background = paper;
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.getElementById('stage').appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(58,1,0.6,1400);
+
+/* Camera state. It never moves in world terms — it moves within player-local
+   space, which is the only space it knows about. Two behaviours:
+     - distance grows with speed, so the car shrinks and the road opens up
+     - it trails behind turns instead of pivoting instantly, which is what makes
+       a chase camera feel attached to a vehicle rather than bolted to it */
+let camD = P.camDist, camYaw = 0, prevA = 0;
+
+function updateCamera(dt, resp){
+  const dTarget = P.camDist * (1 + 0.42*resp);
+  camD += (dTarget - camD) * (1 - Math.exp(-dt/0.50));
+
+  let dA = car.a - prevA; prevA = car.a;
+  dA = Math.atan2(Math.sin(dA), Math.cos(dA));          // shortest way round
+  const rate = dt > 0 ? dA/dt : 0;
+  // negative sign: turning left leaves the camera out to the right, trailing.
+  // Kept deliberately small — this reads as weight, not as a swinging camera.
+  const yawTarget = Math.max(-0.16, Math.min(0.16, -rate * 0.11));
+  camYaw += (yawTarget - camYaw) * (1 - Math.exp(-dt/0.20));
+
+  const h = camD * 0.40;
+  camera.position.set(-camD*Math.sin(camYaw), h, -camD*Math.cos(camYaw));
+
+  const roll = camYaw * 0.18;                            // a little bank
+  camera.up.set(Math.sin(roll), Math.cos(roll), 0);
+
+  const la = camYaw * 0.50;                              // look partly into the turn
+  camera.lookAt(16*Math.sin(la), camD*0.20, 16*Math.cos(la));
+}
+
+function placeCamera(){          // static reset — safe to call before `car` exists
+  camD = P.camDist; camYaw = 0;
+  camera.position.set(0, camD*0.40, -camD);
+  camera.up.set(0,1,0);
+  camera.lookAt(0, camD*0.20, 16);
+}
+placeCamera();
+
+/* The fold's end point has no closed form once scale compression is in play,
+   so integrate it accurately on the CPU whenever R or the map scale changes. */
+function computeBendEnd(k){
+  if(k === undefined) k = P.kMin;
+  const sB = P.R * Math.PI/2, N = 240, ds = sB/N;
+  let Z = 0, Y = 0;
+  for(let i=0;i<N;i++){
+    const t = ((i+0.5)*ds)/sB;
+    const kk = 1 + (k - 1) * (t*t*(3-2*t));
+    const sm = t*t*t*(t*(t*6 - 15) + 10);
+    const phi = (Math.PI/2) * (t + (sm - t)*P.ease);   // must match phiOf()
+    Z += kk * Math.cos(phi) * ds;
+    Y += kk * Math.sin(phi) * ds;
+  }
+  uniforms.uBendEnd.value.set(Z, Y);
+}
+
+const uniforms = {
+  uW2P:      {value:new THREE.Matrix4()},
+  uP2W:      {value:new THREE.Matrix4()},
+  uLocal:    {value:0},
+  uTerr:     {value:new THREE.Vector3(TA,TB,TC)},
+  uTK:       {value:TK},
+  uZ0:       {value:P.z0},
+  uR:        {value:P.R},
+  uKmin:     {value:P.kMin},
+  uFlat:     {value:P.flat},
+  uEase:     {value:P.ease},
+  uFallA:    {value:4000},
+  uBuildH:   {value:P.buildH},
+  uDelta:    {value:0},
+  uRampA:    {value:40},
+  uRampB:    {value:110},
+  uBendEnd:  {value:new THREE.Vector2()},
+  uFogStart: {value:P.fogStart},
+  uFogEnd:   {value:P.fogEnd},
+  uPaper:    {value:new THREE.Vector3(paper.r,paper.g,paper.b)},
+  uLight:    {value:new THREE.Vector3(0.45,0.82,0.35)}
+};
+computeBendEnd();
+
+const bentMat = new THREE.ShaderMaterial({
+  uniforms, vertexShader:VERT, fragmentShader:FRAG, vertexColors:true, side:THREE.DoubleSide
+});
+const bentGlow = new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader:VERT,
+  fragmentShader:`precision highp float; uniform vec3 uPaper;
+    varying vec3 vColor; varying vec3 vN; varying float vFog;
+    void main(){ gl_FragColor = vec4(mix(vColor, uPaper, vFog*0.85), 1.0); }`,
+  vertexColors:true, side:THREE.DoubleSide
+});
+
+/* The road surface is authored directly in player-local space, so it must NOT be
+   transformed by uW2P — it gets its own material with an identity there. Every
+   other uniform is shared by reference, so the sliders still drive it.
+   polygonOffset pushes it a hair away from the camera so pavements, lane dashes
+   and the route ribbon always win the depth test once flattening squashes them
+   into nearly the same plane. */
+const roadUniforms = Object.assign({}, uniforms,
+  {uW2P:{value:new THREE.Matrix4()}, uLocal:{value:1}});
+const roadMat = new THREE.ShaderMaterial({
+  uniforms:roadUniforms, vertexShader:VERT, fragmentShader:FRAG,
+  vertexColors:true, side:THREE.DoubleSide,
+  polygonOffset:true, polygonOffsetFactor:2, polygonOffsetUnits:2
+});
+
+// ---------- build the city tile ----------
+const blocks = [];   // {x,z,w,d} for collision, in home-tile coordinates
+function buildCity(){
+  const b = new Builder();
+  let seed = 20260826;
+  const rnd = () => (seed = (seed*1664525+1013904223) & 0x7fffffff) / 0x7fffffff;
+
+  // lane dashes — these are what make the plan-view region read as a map.
+  // Loops run to GRID (not GRID-1) so the pattern is seamless across the tile join.
+  for(let i=0;i<GRID;i++){
+    for(let j=0;j<GRID;j++){
+      for(let k=0;k<4;k++){
+        const t = nodePos(j) + PITCH*(k+0.5)/4;
+        b.slab(nodePos(i), t, 0.7, 3.4, 0.02, C.dash, 1);
+        b.slab(t, nodePos(i), 3.4, 0.7, 0.02, C.dash, 1);
+      }
+    }
+  }
+
+  for(let i=0;i<GRID;i++){
+    for(let j=0;j<GRID;j++){
+      const cx = nodePos(i)+PITCH/2, cz = nodePos(j)+PITCH/2;
+      const kind = rnd();
+
+      if(kind < 0.11){                       // park / plaza — fully drivable
+        b.slab(cx,cz,BLOCK,BLOCK,0.08,C.park,6);
+        blocks.push({x:cx,z:cz,w:BLOCK*0.3,d:BLOCK*0.3});
+        b.box(cx,cz,BLOCK*0.3,23+rnd()*4,BLOCK*0.3,C.face2,C.park,undefined,-20);
+        continue;
+      }
+
+      if(kind < 0.19){                       // car park — open, dashed, drivable
+        b.slab(cx,cz,BLOCK,BLOCK,0.07,C.lot,6);
+        for(let r=0;r<5;r++){
+          const zz = cz - BLOCK/2 + BLOCK*(r+0.5)/5;
+          for(let c2=0;c2<7;c2++)
+            b.slab(cx - BLOCK/2 + BLOCK*(c2+0.5)/7, zz, 0.5, 4.0, 0.10, C.dash, 1);
+        }
+        continue;
+      }
+
+      b.slab(cx,cz,BLOCK,BLOCK,0.09,C.kerb,6); // pavement pad — drivable
+
+      if(kind < 0.30){                       // superblock: one big tower
+        const h = 34 + rnd()*46;
+        const w = BLOCK*0.80, d = BLOCK*0.80;
+        blocks.push({x:cx,z:cz,w:w,d:d});
+        const tone = 0.88 - Math.min(1, h/58)*0.32;
+        b.box(cx,cz,w,h+20,d, C.face, rnd()<0.25 ? C.matcha : [tone,tone*1.01,tone*1.04], undefined, -20);
+        continue;
+      }
+
+      const n = 1 + (rnd()*4|0);
+      const cells = [[-1,-1],[1,-1],[-1,1],[1,1]];
+      for(let q=0;q<n;q++){
+        const [ox,oz] = n===1 ? [0,0] : cells[q];
+        const w = (n===1? BLOCK*0.78 : BLOCK*0.40) * (0.8+rnd()*0.2);
+        const d = (n===1? BLOCK*0.78 : BLOCK*0.40) * (0.8+rnd()*0.2);
+        const h = 6 + Math.pow(rnd(),2.4)*54;
+        const bx = cx + ox*BLOCK*0.24, bz = cz + oz*BLOCK*0.24;
+        // collision is per BUILDING, not per block — that's what makes the
+        // pavement a shortcut you can take rather than a wall
+        blocks.push({x:bx,z:bz,w:w,d:d});
+        // SKIRT: buildings are rigid and vertical, so on a slope a flat base
+        // would float clear of the ground uphill. Bury them 20 units. Must be
+        // generous: uBuildH shrinks the skirt but never shrinks the terrain.
+        // Once buildings lie flat, the roof is all the map has to work with —
+        // so darken it with height. Tall blocks read as dark masses from above.
+        const tone = 0.88 - Math.min(1, h/58) * 0.32;
+        const roof = rnd() < 0.10 ? C.matcha : [tone, tone*1.01, tone*1.04];
+        b.box(bx,bz,w,h+20,d, rnd()<0.35 ? C.face2 : C.face, roof, undefined, -20);
+      }
+    }
+  }
+
+  // one geometry, twenty-five positions. 5x5 rather than 3x3 because map
+  // compression can see much further than the old fog distance allowed.
+  const geo = b.toGeometry();
+  for(let ox=-2; ox<=2; ox++){
+    for(let oz=-2; oz<=2; oz++){
+      const m = new THREE.Mesh(geo, bentMat);
+      m.position.set(ox*TILE, 0, oz*TILE);
+      m.frustumCulled = false;
+      scene.add(m);
+    }
+  }
+}
+
+/* ---------- road surface ----------
+   Not tiled. It's a featureless grey field, so instead of repeating it we build
+   ONE mesh that lives permanently in player-local space — it never moves, never
+   rotates, and costs almost nothing. Its subdivision is packed toward the camera
+   with a power curve, so the fold always lands in the dense part of the mesh. */
+function buildRoadSurface(){
+  // Lateral subdivision used to be almost nothing, because the bend only scales
+  // x linearly. Terrain varies in x too, so it needs real columns now.
+  const XS = 64, ZS = 260, X = 1200, ZA = -90, ZB = 1400, POW = 2.2;
+  const p=[], n=[], c=[];
+  const zAt = u => ZA + (ZB-ZA)*Math.pow(u,POW);
+  const tri = (a,b_,c_) => { p.push(...a,...b_,...c_);
+    for(let k=0;k<3;k++){ n.push(0,1,0); c.push(...C.road); } };
+  for(let i=0;i<XS;i++){
+    const x0=-X+2*X*i/XS, x1=-X+2*X*(i+1)/XS;
+    for(let j=0;j<ZS;j++){
+      const z0=zAt(j/ZS), z1=zAt((j+1)/ZS);
+      tri([x0,0,z0],[x1,0,z1],[x1,0,z0]);
+      tri([x0,0,z0],[x0,0,z1],[x1,0,z1]);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
+  g.setAttribute('normal',  new THREE.Float32BufferAttribute(n,3));
+  g.setAttribute('color',   new THREE.Float32BufferAttribute(c,3));
+  g.setAttribute('aAnchor', new THREE.Float32BufferAttribute(new Float32Array(p.length/3*2),2));
+  const m = new THREE.Mesh(g, roadMat);
+  m.frustumCulled = false;
+  m.renderOrder = -1;
+  scene.add(m);
+}
+buildCity();
+buildRoadSurface();
+
+// ---------- route ribbon (rebuilt whenever the target changes) ----------
+let ribbon = null;
+function drawRibbon(path){
+  if(ribbon){ scene.remove(ribbon); ribbon.geometry.dispose(); ribbon=null; }
+  if(!path || path.length<2) return;
+  const b = new Builder(), W = 4.6, Y = 0.16;
+  for(let i=0;i<path.length-1;i++){
+    const a=path[i], c=path[i+1];
+    const dx=c[0]-a[0], dz=c[1]-a[1], len=Math.hypot(dx,dz);
+    const ux=dx/len, uz=dz/len, px=-uz*W/2, pz=ux*W/2;
+    const steps = Math.max(2, Math.round(len/2));   // dense = smooth bend
+    for(let s=0;s<steps;s++){
+      const t0=s/steps, t1=(s+1)/steps;
+      const A=[a[0]+dx*t0, a[1]+dz*t0], B=[a[0]+dx*t1, a[1]+dz*t1];
+      // the route climbs onto the viaduct with the road it's following
+      b.quad([A[0]-px,Y,A[1]-pz],[A[0]+px,Y,A[1]+pz],
+             [B[0]+px,Y,B[1]+pz],[B[0]-px,Y,B[1]-pz],1,1,C.matcha);
+    }
+    // corner patch so turns don't gap
+    b.slab(c[0],c[1],W,W,Y,C.matcha,1);
+  }
+  ribbon = new THREE.Mesh(b.toGeometry(), bentGlow);
+  ribbon.frustumCulled=false;
+  ribbon.renderOrder = 1;
+  ribbon.material.depthWrite = false;
+  scene.add(ribbon);
+}
+
+// ---------- destination marker ----------
+// Two parts, because the two regions need different things:
+//   the pillar is the beacon you see down the street (near field),
+//   the ring is a flat footprint that survives onto the map (far field).
+let pillar=null;
+function drawPillar(x,z){
+  if(pillar){ scene.remove(pillar); pillar.geometry.dispose(); }
+  const b=new Builder();
+  b.box(x,z,2.2,66,2.2,C.matcha,C.matcha,8,-20);
+  const OUT=22, T=3.2;                       // hollow square ring on the ground
+  b.slab(x, z+OUT/2, OUT, T, 0.22, C.matcha, 4);
+  b.slab(x, z-OUT/2, OUT, T, 0.22, C.matcha, 4);
+  b.slab(x+OUT/2, z, T, OUT, 0.22, C.matcha, 4);
+  b.slab(x-OUT/2, z, T, OUT, 0.22, C.matcha, 4);
+  pillar = new THREE.Mesh(b.toGeometry(), bentGlow);
+  pillar.frustumCulled=false;
+  scene.add(pillar);
+}
+
+// ---------- the car (lives at local origin, so it never bends) ----------
+const flatShader = {
+  vertexShader:`varying vec3 vColor; varying vec3 vN;
+    void main(){ vColor=color; vN=normalize(mat3(modelMatrix)*normal);
+    gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`precision highp float; uniform vec3 uLight;
+    varying vec3 vColor; varying vec3 vN;
+    void main(){ float d=max(dot(normalize(vN),normalize(uLight)),0.0);
+      float sky=0.5+0.5*normalize(vN).y;
+      gl_FragColor=vec4(vColor*(0.44+0.34*d+0.22*sky),1.0); }`
+};
+function flatMesh(geo){
+  return new THREE.Mesh(geo, new THREE.ShaderMaterial({
+    uniforms:{uLight:uniforms.uLight}, ...flatShader,
+    vertexColors:true, side:THREE.DoubleSide
+  }));
+}
+
+function buildCar(){
+  const tyre = [0.10,0.11,0.12], glass = [0.30,0.36,0.42];
+  const shell = [0.94,0.95,0.96];
+
+  /* Kei truck, cab-over: the cab sits right over the front axle with almost no
+     bonnet, and the bed runs behind it. Narrow track, tall body — which is
+     exactly why it leans so much in corners. */
+  const bb = new Builder();
+  bb.box(0,  0.00, 1.40, 0.22, 3.20, C.deckS, C.deckS, 4, 0.34);   // chassis rail
+  bb.box(0,  0.98, 1.42, 1.16, 1.30, shell, shell, 3, 0.56);       // cab
+  bb.box(0,  1.02, 1.30, 0.42, 1.06, glass, glass, 2, 1.10);       // glass band
+  bb.box(0, -0.70, 1.40, 0.16, 1.86, C.matcha, C.matcha, 3, 0.56); // bed floor
+  bb.box(0, -1.62, 1.40, 0.44, 0.10, C.matcha, C.matcha, 2, 0.56); // tailgate
+  bb.box( 0.65,-0.70, 0.10, 0.40, 1.86, C.matcha, C.matcha, 3, 0.56);
+  bb.box(-0.65,-0.70, 0.10, 0.40, 1.86, C.matcha, C.matcha, 3, 0.56);
+  // the cargo
+  bb.box( 0.30,-0.35, 0.52, 0.34, 0.52, C.melon, C.melon, 2, 0.72);
+  bb.box(-0.32,-0.98, 0.52, 0.34, 0.52, C.melon, C.melon, 2, 0.72);
+  bb.box( 0.28,-1.10, 0.44, 0.30, 0.44, C.melon, C.melon, 2, 1.06);
+  const body = flatMesh(bb.toGeometry());
+
+  // wheels are separate objects, NOT children of the body — they stay upright
+  // and vertical while the body pitches and rolls above them
+  const wheels = [];
+  for(let i=0;i<4;i++){
+    const wb = new Builder();
+    wb.box(0, 0, 0.26, 0.56, 0.56, tyre, tyre, 2, -0.28);
+    const w = flatMesh(wb.toGeometry());
+    wheels.push(w); scene.add(w);
+  }
+  scene.add(body);
+  return {body, wheels};
+}
+const carMesh = buildCar();
+
+/* ============================ routing ============================
+   Deliberately does NOT wrap. The route is only ever drawn in the home tile,
+   so it never crosses a seam and never appears twice — the repeated city is
+   scenery, the route is the one thing that tells you where you actually are. */
+function nearestNode(x,z){
+  return [ Math.max(0,Math.min(GRID-1,Math.round(wrap(x)/PITCH))),
+           Math.max(0,Math.min(GRID-1,Math.round(wrap(z)/PITCH))) ];
+}
+function bfs(from,to){
+  const key=(i,j)=>i*GRID+j, prev=new Map(), q=[from];
+  prev.set(key(...from),null);
+  while(q.length){
+    const [i,j]=q.shift();
+    if(i===to[0]&&j===to[1]) break;
+    for(const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const ni=i+di,nj=j+dj;
+      if(ni<0||nj<0||ni>=GRID||nj>=GRID) continue;
+      if(prev.has(key(ni,nj))) continue;
+      prev.set(key(ni,nj),[i,j]); q.push([ni,nj]);
+    }
+  }
+  const path=[]; let cur=to;
+  while(cur){ path.unshift([nodePos(cur[0]),nodePos(cur[1])]); cur=prev.get(key(...cur)); }
+  return path;
+}
+
+/* ============================ game state ============================ */
+/* ============================ vehicle ============================
+   Raycast suspension. Four springs, each finding the ground independently,
+   carrying a share of the car's weight. The body rides on them, so pitch and
+   roll are RESULTS rather than animations — and because each tyre's grip is
+   proportional to the load its own spring is carrying, weight transfer feeds
+   straight back into handling. Brake hard and the front bites; get on the power
+   and the unloaded rear lets go.
+
+   The ground here is flat, so the "ray" is just the attachment point's height.
+   The structure is what matters: swap in a height lookup and hills work. */
+const V = {
+  mass: 900, halfTrack: 0.70, axleF: 1.10, axleR: -1.10,
+  comH: 0.42, attachDrop: 0.05,
+  wheelR: 0.28, susRest: 0.34,
+  springK: 17000, damper: 1950, arb: 2000, arbMax: 2500,
+  Iyaw: 560, Ipitch: 470, Iroll: 210,
+  drive: 16500, brake: 15000, maxSteer: 0.66,
+  // front cornering stiffness deliberately HIGHER than rear: that's what turns
+  // understeer into a car that rotates. mu must stay well under the rollover
+  // threshold, track/(2*comH) = 1.67g for this kei truck — see the context notes.
+  cornerF: 10.0, cornerR: 9.0, mu: 1.42,
+  assist: 2.4,                       // velocity redirection rate, per second
+  rollC: 45, rollV: 5, aero: 0.62
+};
+
+// wheel layout: [sideways offset (+ is left), forward offset, is front, is rear]
+const WHEELS = [
+  { s:  V.halfTrack, f: V.axleF, front:true,  rear:false },
+  { s: -V.halfTrack, f: V.axleF, front:true,  rear:false },
+  { s:  V.halfTrack, f: V.axleR, front:false, rear:true  },
+  { s: -V.halfTrack, f: V.axleR, front:false, rear:true  }
+];
+
+const car = {
+  x: nodePos(1), z: nodePos(1), y: V.comH, a: 0,
+  vx:0, vy:0, vz:0, v:0,
+  yaw:0, pitch:0, roll:0, pitchRate:0, rollRate:0,
+  load:[0,0,0,0], wheelY:[0,0,0,0]
+};
+
+// Off-road = anywhere inside a block footprint: pavement, plaza or park.
+// Drivable, but draggy and slippery — cutting a corner costs you speed.
+function onOffroad(x,z){
+  const lx = wrap(x) % PITCH, lz = wrap(z) % PITCH;
+  return lx > ROADW/2 && lx < PITCH-ROADW/2 && lz > ROADW/2 && lz < PITCH-ROADW/2;
+}
+
+function stepVehicle(h, thr, str){
+  const sa = Math.sin(car.a), ca = Math.cos(car.a);
+  const fx = sa,  fz = ca;      // forward
+  const lx = ca,  lz = -sa;     // left
+
+  const off = onOffroad(car.x, car.z);
+  const mu  = V.mu * (off ? 0.66 : 1);
+
+  const speed = car.vx*fx + car.vz*fz;
+  const steer = -str * V.maxSteer * (1 - 0.45*Math.min(1, Math.abs(speed)/P.vMax));
+
+  let Fx=0, Fz=0, Fy=0, tYaw=0, tPitch=0, tRoll=0;
+
+  /* Pass one: find every spring's compression before deciding any loads. The
+     anti-roll bar couples the two wheels on an axle, so a wheel's load depends
+     on its partner's compression — which means you can't do this in one pass. */
+  const comp = [0,0,0,0], cvy = [0,0,0,0];
+  for(let i=0;i<4;i++){
+    const W = WHEELS[i];
+    const attachY = car.y - V.attachDrop + W.f*car.pitch + W.s*car.roll;
+    // where in the world is this wheel, and what's underneath it?
+    const wpx = car.x + fx*W.f + lx*W.s;
+    const wpz = car.z + fz*W.f + lz*W.s;
+    const gy  = terrainAt(wpx, wpz);
+    comp[i] = Math.max(0, (V.wheelR + V.susRest) - (attachY - gy));
+    cvy[i]  = car.vy + W.f*car.pitchRate + W.s*car.rollRate;
+    car.wheelY[i] = comp[i] > 0 ? gy + V.wheelR : attachY - V.susRest;
+  }
+
+  /* Loads. The anti-roll bar TRANSFERS load between the two wheels on an axle —
+     it must never add any, or a lifted inside wheel gives its partner a
+     one-sided shove and the car launches itself off the road. So it's computed
+     once per axle, applied equal and opposite, clamped, and switched off
+     entirely the moment either wheel leaves the ground. */
+  const load = car.load;
+  for(const [a,bw] of [[0,1],[2,3]]){
+    const both = comp[a] > 0 && comp[bw] > 0;
+    let arbF = both ? V.arb * (comp[a] - comp[bw]) : 0;
+    arbF = Math.max(-V.arbMax, Math.min(V.arbMax, arbF));
+    const spring = (i,extra) => comp[i] <= 0 ? 0 :
+      Math.max(0, Math.min(V.springK*comp[i] - V.damper*cvy[i] + extra, 20000));
+    load[a]  = spring(a,  arbF);
+    load[bw] = spring(bw, -arbF);
+  }
+
+  for(let i=0;i<4;i++){
+    const W = WHEELS[i];
+    const Fz_ = load[i];
+    if(Fz_ <= 0) continue;
+
+    Fy     += Fz_;
+    tPitch += Fz_ * W.f;
+    tRoll  += Fz_ * W.s;
+
+    // --- tyre forces, scaled by THIS wheel's load ---
+    const d = W.front ? steer : 0;
+    const cd = Math.cos(d), sd = Math.sin(d);
+    const wfx = fx*cd + lx*sd, wfz = fz*cd + lz*sd;   // wheel forward
+    const wsx = lx*cd - fx*sd, wsz = lz*cd - fz*sd;   // wheel left
+
+    // velocity at the contact patch, including yaw
+    const vpx = car.vx + car.yaw*(-fx*W.s + lx*W.f);
+    const vpz = car.vz + car.yaw*(-fz*W.s + lz*W.f);
+    const vf = vpx*wfx + vpz*wfz;
+    const vs = vpx*wsx + vpz*wsz;
+
+    const grip = mu * Fz_;
+    const slip = Math.atan2(vs, Math.abs(vf) + 1.0);
+    let fLat = -slip * (W.front ? V.cornerF : V.cornerR) * Fz_;
+
+    let fLong = 0;
+    if(thr > 0 && W.rear){
+      fLong = V.drive * thr * 0.5 * (1 - 0.80*Math.min(1, Math.abs(speed)/P.vMax));
+    } else if(thr < 0){
+      fLong = -Math.sign(vf || 1) * V.brake * -thr * (W.front ? 0.31 : 0.19);
+    }
+    // rolling resistance: a constant part plus a small speed-dependent part
+    const rr = off ? 5 : 1;
+    fLong -= (Math.sign(vf) * V.rollC + vf * V.rollV) * rr;
+
+    // friction circle — a tyre only has so much to give in total
+    const mag = Math.hypot(fLong, fLat);
+    if(mag > grip){ const k = grip/mag; fLong *= k; fLat *= k; }
+
+    const wx = wfx*fLong + wsx*fLat;
+    const wz = wfz*fLong + wsz*fLat;
+    Fx += wx; Fz += wz;
+    tYaw += W.f*(wx*lx + wz*lz) - W.s*(wx*fx + wz*fz);
+  }
+
+  /* Weight transfer. Tyre forces act at the contact patch, which is comH BELOW
+     the centre of mass, so every one of them twists the body. This is the line
+     that makes the nose dive under braking and the inside wheels go light in a
+     corner — and because each spring's load feeds back into that tyre's grip
+     limit, the handling changes with the attitude rather than just looking like
+     it does. */
+  const Ffwd = Fx*fx + Fz*fz;
+  const Flft = Fx*lx + Fz*lz;
+  tPitch += Ffwd * V.comH;
+  tRoll  += Flft * V.comH;
+
+  // gravity's component along the hillside — climbs cost speed, descents pay it
+  const [gx, gz] = slopeAt(car.x, car.z);
+  Fx -= V.mass * 9.81 * gx;
+  Fz -= V.mass * 9.81 * gz;
+
+  // aerodynamic drag, on the body rather than the tyres
+  const sp = Math.hypot(car.vx, car.vz);
+  Fx -= car.vx * V.aero * sp;
+  Fz -= car.vz * V.aero * sp;
+
+  // --- integrate ---
+  car.vx += (Fx / V.mass) * h;
+  car.vz += (Fz / V.mass) * h;
+  car.vy += (Fy / V.mass - 9.81) * h;
+
+  car.yaw       += (tYaw   / V.Iyaw)   * h;
+  car.pitchRate += (tPitch / V.Ipitch) * h;
+  car.rollRate  += (tRoll  / V.Iroll)  * h;
+  car.yaw       *= (1 - 0.6*h);
+  car.pitchRate *= (1 - 1.1*h);
+  car.rollRate  *= (1 - 1.1*h);
+
+  car.yaw = Math.max(-2.6, Math.min(2.6, car.yaw));   // never spin like a top
+
+  /* Arcade grip assist — velocity redirection. Rather than handing the car free
+     rotation (which just makes it spin), we rotate the VELOCITY VECTOR a little
+     way toward where the nose is already pointing. The car follows its nose, so
+     it turns in willingly and recovers from a slide instead of ploughing on.
+     Tyres still behave consistently; nothing is faked about the forces.
+     Lower V.assist = more sliding and more skill required. */
+  const grounded = car.load[0]+car.load[1]+car.load[2]+car.load[3] > 0;
+  const spd2 = Math.hypot(car.vx, car.vz);
+  if(grounded && spd2 > 1.0){
+    const vdir = Math.atan2(car.vx, car.vz);
+    let off2 = car.a - vdir;
+    off2 = Math.atan2(Math.sin(off2), Math.cos(off2));
+    const na = vdir + off2 * Math.min(1, V.assist * h);
+    car.vx = Math.sin(na) * spd2;
+    car.vz = Math.cos(na) * spd2;
+  }
+
+  car.y     += car.vy * h;
+  car.a     += car.yaw * h;
+  car.pitch += car.pitchRate * h;
+  car.roll  += car.rollRate * h;
+  // hard stops — zero the rate too, or the body keeps winding up against the
+  // limit and then snaps back the instant the load comes off
+  if(car.pitch >  0.16){ car.pitch =  0.16; car.pitchRate = Math.min(0, car.pitchRate); }
+  if(car.pitch < -0.16){ car.pitch = -0.16; car.pitchRate = Math.max(0, car.pitchRate); }
+  if(car.roll  >  0.16){ car.roll  =  0.16; car.rollRate  = Math.min(0, car.rollRate);  }
+  if(car.roll  < -0.16){ car.roll  = -0.16; car.rollRate  = Math.max(0, car.rollRate);  }
+
+  const gy0 = terrainAt(car.x, car.z);
+  if(car.y < gy0 + 0.20){ car.y = gy0 + 0.20; car.vy = Math.max(0, car.vy); }
+
+  car.x = wrap(car.x + car.vx * h);
+  car.z = wrap(car.z + car.vz * h);
+  collide();
+
+  car.v = car.vx*fx + car.vz*fz;
+}
+let target=[4,4], carrying=false, score=0, running=true;
+const el = id => document.getElementById(id);
+
+function newTarget(){
+  let t, tries=0;
+  do {
+    t=[ (Math.random()*GRID)|0, (Math.random()*GRID)|0 ];
+    tries++;
+  } while(tries < 60 &&
+    // far enough away that the map region has to earn its place
+    Math.hypot(nodePos(t[0])-car.x, nodePos(t[1])-car.z) < PITCH*5.2);
+  target=t;
+  drawPillar(nodePos(t[0]),nodePos(t[1]));
+  routeDirty=true;
+  el('what').innerHTML = carrying
+    ? 'Deliver the <span class="accent">melonpan</span>'
+    : 'Collect the <span class="accent">melonpan</span>';
+}
+let routeDirty=true;
+let zDyn = P.z0, kDyn = P.kMin, prevV = 0;   // smoothed, speed-driven bend state
+let aLag = 0;                                 // heading the far field is aligned to
+function refreshRoute(){
+  drawRibbon(bfs(nearestNode(car.x,car.z), target));
+  routeDirty=false;
+}
+newTarget(); refreshRoute();
+
+function flash(){
+  const f=el('flash'); f.style.opacity=0.5;
+  setTimeout(()=>f.style.opacity=0,60);
+}
+
+/* ============================ input ============================
+   One joystick, both axes, springs back to centre.
+   - horizontal -> steering
+   - vertical   -> push up to accelerate, down to brake
+   Keyboard still works if you're at a desk. */
+function Joystick(id){
+  const base = el(id), knob = base.querySelector('.knob');
+  const RAD = 40;                       // how far the knob travels, in pixels
+  const state = {x:0, y:0};
+  let id_ = null;
+
+  const move = e => {
+    if(e.pointerId !== id_) return;
+    const r = base.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width/2);
+    let dy = e.clientY - (r.top  + r.height/2);
+    const len = Math.hypot(dx,dy);
+    if(len > RAD){ dx = dx/len*RAD; dy = dy/len*RAD; }
+    state.x = dx/RAD; state.y = -dy/RAD;        // y positive = pushed up
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  };
+  const end = e => {
+    if(e.pointerId !== id_) return;
+    id_ = null; base.classList.remove('live');
+    state.x = 0; state.y = 0;
+    knob.style.transform = 'translate(0,0)';
+  };
+  base.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    id_ = e.pointerId; base.setPointerCapture(e.pointerId);
+    base.classList.add('live'); move(e);
+  });
+  base.addEventListener('pointermove', move);
+  base.addEventListener('pointerup', end);
+  base.addEventListener('pointercancel', end);
+  return state;
+}
+const stick = Joystick('stickL');   // x = steering, y = throttle / brake
+
+const keys={};
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()))e.preventDefault();});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+function readControls(){
+  let thr = stick.y;
+  let str = stick.x;
+  // keyboard overrides the sliders while a key is held
+  if(keys['w']||keys['arrowup'])              thr = 1;
+  if(keys['s']||keys['arrowdown']||keys[' ']) thr = -1;
+  if(keys['a']||keys['arrowleft'])            str = -1;
+  if(keys['d']||keys['arrowright'])           str = 1;
+  return {thr, str};
+}
+
+/* ============================ tuner ============================ */
+el('tuneBtn').onclick=()=>el('tuner').classList.toggle('on');
+const wire=(sl,out,fn)=>{const s=el(sl);s.oninput=()=>{el(out).textContent=s.value;fn(parseFloat(s.value));};};
+wire('s0','v0',v=>{P.z0=v;});
+wire('s1','v1',v=>{P.R=v;  uniforms.uR.value=v;  computeBendEnd(kDyn);});
+wire('s3','v3',v=>{P.kMin=v; kDyn=v; computeBendEnd(v);});
+wire('s6','v6',v=>{P.push=v;});
+wire('s5','v5',v=>{P.ease=v; uniforms.uEase.value=v; computeBendEnd(kDyn);});
+wire('s4','v4',v=>{P.flat=v; uniforms.uFlat.value=v;});
+wire('s7','v7',v=>{P.fall=v;});
+wire('s8','v8',v=>{P.buildH=v; uniforms.uBuildH.value=v;});
+wire('s9','v9',v=>{P.lock=v;});
+wire('s2','v2',v=>{P.camDist=v; placeCamera();});
+el('v3').textContent = P.kMin.toFixed(2);
+el('v4').textContent = P.flat.toFixed(2);
+el('v7').textContent = P.fall.toFixed(2);
+el('v8').textContent = P.buildH.toFixed(2);
+el('v9').textContent = P.lock.toFixed(2);
+
+/* ============================ loop ============================ */
+function collide(){
+  for(const b of blocks){
+    const hw=b.w/2+1.4, hd=b.d/2+1.4;
+    const dx=car.x-b.x, dz=car.z-b.z;
+    if(Math.abs(dx)<hw && Math.abs(dz)<hd){
+      const px=hw-Math.abs(dx), pz=hd-Math.abs(dz);
+      if(px<pz){ car.x = b.x + Math.sign(dx||1)*hw; car.vx *= -0.15; car.vz *= 0.55; }
+      else     { car.z = b.z + Math.sign(dz||1)*hd; car.vz *= -0.15; car.vx *= 0.55; }
+    }
+  }
+}
+
+let last=performance.now();
+function tick(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+
+  if(running){
+    // ---- drive ----
+    const {thr, str} = readControls();
+
+    // three substeps: springs are stiff, and one big step can go unstable
+    const sub = dt/3;
+    for(let i=0;i<3;i++) stepVehicle(sub, thr, str);
+
+    // ---- visuals ride the physics ----
+    carMesh.body.position.set(0, car.y - V.comH, 0);
+    carMesh.body.rotation.set(-car.pitch, 0, car.roll);
+    for(let i=0;i<4;i++){
+      const W = WHEELS[i];
+      carMesh.wheels[i].position.set(W.s, car.wheelY[i], W.f);
+    }
+
+    // ---- objective ----
+    const tx=nodePos(target[0]), tz=nodePos(target[1]);
+    const dist=Math.hypot(tx-car.x, tz-car.z);
+    if(dist < 9){
+      flash();
+      if(carrying){ score++; el('score').textContent=score; }
+      carrying = !carrying;
+      newTarget();
+    }
+    el('dist').textContent = Math.round(dist) + ' M' + (carrying?' — to the drop':'');
+
+    // recompute the ribbon a few times a second, not every frame
+    if(routeDirty || Math.random()<0.06) refreshRoute();
+
+    el('speed').textContent = Math.round(Math.abs(car.v) * 2.4);
+
+    /* ---- speed-reactive projection ----
+       Standing still you want situational awareness: a near horizon and a big
+       map. At speed you want the road: the bend start pushes out so the
+       life-size street grows, and the map zooms out to compensate for sitting
+       further away. A lag term stops it snapping, and a small acceleration
+       term gives the surge some punch on the throttle. */
+    const spd  = Math.min(1, Math.abs(car.v) / P.vMax);
+    const resp = spd*spd*(3-2*spd);
+    const accel = Math.max(0, Math.min(1, (car.v - prevV) / (dt * 34)));
+    prevV = car.v;
+
+    const targetZ0 = P.z0   + P.push * (resp*0.85 + accel*0.15);
+    const targetK  = P.kMin * (P.push > 0 ? (1 - 0.30*resp) : 1);
+    const lag = 1 - Math.exp(-dt / 0.55);
+    zDyn += (targetZ0 - zDyn) * lag;
+    kDyn += (targetK  - kDyn) * lag;
+
+    uniforms.uZ0.value   = zDyn;
+    uniforms.uKmin.value = kDyn;
+    computeBendEnd(kDyn);
+
+    /* ---- map orientation lag ----
+       aLag is the heading the far field is aligned to. At lock 0 it tracks the
+       car exactly (map turns with you). At lock 1 it never moves (map is
+       world-locked, north stays north). In between it drifts, so the map swings
+       lazily behind your turns instead of whipping around. */
+    if(P.lock <= 0.001){
+      aLag = car.a;
+    } else if(P.lock < 0.999){
+      let d = car.a - aLag;
+      d = Math.atan2(Math.sin(d), Math.cos(d));          // shortest way round
+      aLag += d * (1 - Math.exp(-dt * (1 - P.lock) * 9));
+    }
+    let delta = car.a - aLag;
+    uniforms.uDelta.value = Math.atan2(Math.sin(delta), Math.cos(delta));
+
+    // the twist band sits over the fold, wherever the fold currently is
+    const sB = P.R * Math.PI/2;
+    uniforms.uRampA.value = zDyn * 0.45;
+    uniforms.uRampB.value = zDyn + sB;
+
+    // strong compression can see much further, so the fog has to open up too
+    uniforms.uFallA.value   = 40 + 8000 * Math.pow(1 - P.fall, 3);
+    uniforms.uFogEnd.value   = 490 + 520 * P.fall;
+    uniforms.uFogStart.value = 240 + 300 * P.fall;
+
+    updateCamera(dt, resp);
+  }
+
+  // ---- feed the shader the player's frame of reference (lagged heading) ----
+  uniforms.uW2P.value
+    .makeRotationY(-aLag)
+    .multiply(new THREE.Matrix4().makeTranslation(-car.x, 0, -car.z));
+  uniforms.uP2W.value.copy(uniforms.uW2P.value).invert();
+
+  renderer.render(scene,camera);
+  requestAnimationFrame(tick);
+}
+
+function resize(){
+  const w=innerWidth,h=innerHeight;
+  renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize); resize();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
