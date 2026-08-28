@@ -1,6 +1,6 @@
 # Melonpan Delivery Service — project context
 
-_Last updated: 26 Aug 2026_
+_Last updated: 28 Aug 2026_
 
 ## What this is
 
@@ -24,7 +24,7 @@ navigation view that removes the need to ever look at a minimap.
 
 | | |
 |---|---|
-| Mechanics | Collect melonpan → deliver → score. Single analogue joystick. No timer yet. |
+| Mechanics | Load at a bakery, sequence several live orders against the clock, beat the rivals to them. Single analogue joystick. |
 | Vehicle | Kei truck based on the 2010 Subaru Sambar. Cab-over, narrow track, tall body — it leans. |
 | Aesthetic | Near-white concrete, cool grey shade, matcha green `#7FA650` as the only accent, with a warm melonpan `#E8C87A` for cargo. Flat shading, no textures. |
 | Camera | Fixed chase cam. The **world** bends, not the camera. |
@@ -36,8 +36,9 @@ warp. Simple shapes don't.
 
 ## How the bend actually works
 
-This is the whole concept, and it's about 12 lines of GLSL (`bendGLSL` in
-`bent-city.html`).
+This is the whole concept, and it's about 12 lines of GLSL — `BEND_GLSL` in
+`src/render/shaders.ts` (it was `bendGLSL` in `bent-city.html`, back when the
+whole game was one file).
 
 Everything is transformed into **player-local space** first: `+Z` is straight
 ahead, `+Y` is up, origin is the car. Then, per vertex:
@@ -61,7 +62,7 @@ stays constant at `kMin` after that.
   the curve rather than appearing as a seam.
 - The curve is walked by numerical integration (16 steps in the shader), since
   there's no clean closed form once `k` varies. The fold's end point is
-  integrated once on the CPU (`computeBendEnd`, 800 steps) and passed in as a
+  integrated once on the CPU (`computeBendEnd`, 240 steps) and passed in as a
   uniform, so the majority of vertices — everything past the fold — skip the
   loop entirely.
 
@@ -120,9 +121,10 @@ car stays in shot at any setting.
 
 All six are exposed as sliders in the running build under "Tune the bend".
 
-Current defaults (Chris's preference): `z0` 70, `R` 20, `kMin` 0.40, `uEase` 1.00,
-`uFlat` 0.06, camera 11. City grid widened to 13×13 so there's something to see
-at that zoom.
+These numbers moved again after more playtesting — see **Agreed defaults**
+below, which is the authoritative table. The grid stayed at 9×9; widening it to
+13×13 was tried and reverted, because tighter map scale showed enough ground
+without the vertex cost.
 
 ### The gotchas (learned the hard way)
 
@@ -144,30 +146,88 @@ at that zoom.
    went dead and there was no error to see. (Hit this 26 Aug.)
 6. **Distant geometry stacks vertically forever.** Fog fade (`uFogStart`/`uFogEnd`)
    dissolves it into the background colour before it becomes a tower of noise.
+7. **`uBuildH` catches you twice.** It scaled the viaducts (see below) and then,
+   months later, it scaled the traffic — cars rendered at a third height and
+   read as grey shards lying in the road. The rule is one line and applies to
+   everything: that uniform scales BUILDING height for map legibility, so
+   anything meant to be life size must pre-divide by it, and anything the truck
+   drives ON is added after it.
+8. **A moving object cannot be moved with a transform.** Every vertex carries an
+   anchor naming the bit of hillside to lift it onto, baked in at build time —
+   so translating the mesh leaves the anchor stale and the object floats or
+   sinks. Moving things (traffic, pedestrians, rivals, rings, the ribbon) are
+   re-authored in world space every frame into preallocated buffers. That is
+   cheaper than the GC churn of rebuilding a BufferGeometry sixty times a second.
+9. **Markers must be drawn through the seam.** Gameplay measures distance across
+   the tile wrap, so a drop 60m away really is 60m away — but drawn in home-tile
+   coordinates its beacon sat half a city away and the HUD looked like it was
+   lying. Marks are positioned on the copy of the city nearest the truck. The
+   route is still computed and drawn once; it is only drawn in the tile you are
+   standing in.
+10. **Vertical subdivision of a box is pointless, and it was costing four to
+    nine times the geometry of every tall building.** Work the bend through at a
+    fixed player-local z: fold angle, local scale, flatten ramp and the point on
+    the folded curve are all functions of z alone, and height then enters only
+    as `y + h·cos φ` and `z − h·sin φ` — affine in h. The map-lock twist is a
+    rotation about Y whose blend ramp is on radial distance in xz, so it does
+    not touch y either. Subdividing vertically produced vertices that land
+    exactly on the straight edge between the corners. Subdivision along **z** is
+    the one that matters: that is the axis the fold consumes.
+11. **Two surfaces that both drape will fight.** The road surface and the
+    pavement pads each approximate the same curved terrain with their own
+    tessellation, and the coarser one pokes through the finer. It showed as a
+    sawtooth along every kerb and as white slivers on the horizon. Fixed by
+    packing the road's lateral subdivision toward the camera and pushing it
+    further back with `polygonOffset` — not by subdividing the pads, which would
+    have doubled the tile.
 
-## Current state — v0.1 playable
+## Current state — v1.0, an actual game (28 Aug)
+
+It is no longer a projection demo with a scoring loop bolted on. There is a
+game, and the game is *about* the projection.
 
 Working:
-- Bend shader with live tuning sliders
-- Endlessly repeating city — one 9×9 tile drawn 3×3, player position wrapped
-- Accent-roofed landmark buildings (navigable features in the plan-view region)
-- Driving with collision against blocks
-- BFS route-finding on the intersection graph
-- Red route ribbon that follows the bend
-- Destination pillar (bends into a dramatic lean at distance)
-- Pickup/delivery loop and score. **No timer** — this is a sandbox for
-  experimenting with the projection, not a challenge yet. Add one back when the
-  view stops being the thing under test.
-- One virtual joystick, both axes (horizontal = steer, vertical = throttle/brake),
-  spring-centred, built on pointer events with pointer capture. Keyboard
-  (WASD / arrows / space) overrides it when held.
+- The bend, with all ten parameters live on sliders and saved between sessions
+- Endlessly repeating city — one 9×9 tile drawn 5×5, player position wrapped
+- Nine block archetypes, several of them landmarks designed to be read from above
+- Terrain, raycast suspension, weight transfer, pavements as costly shortcuts
+- **Dispatch**: several live orders at once, a three-crate capacity, bakeries,
+  rival couriers and road closures — see the section below, which is the answer
+  to open question #3
+- Traffic and pedestrians
+- Turn arrows painted at the junction you are about to reach
+- Three modes: Evening shift, Rush hour, Free roam
+- Title, pause, results, restart, settings, best scores — no refreshing to replay
+- Full synthesised audio: layered engine, tyre and surface noise, panned rivals,
+  four-stem adaptive music
+- 42 headless tests over the rules, the physics and collision
 
 Not built yet:
-- Traffic, pedestrians, anything alive
-- Sound
-- Junction-level guidance in the near field (turn arrows painted on the road)
-- Any handling nuance — the car is a placeholder
-- Menus, restart without refreshing
+- Any handling nuance beyond what is there — the truck is good, not finished
+- Non-uniform block pitch, diagonal avenues, a river with bridges
+- PWA offline caching, an Electron build, Steamworks
+
+### It is a repo now, not a file
+
+Phase 0 is done. `bent-city.html` is kept as the historical prototype and is no
+longer the game; the game is a Vite + TypeScript application under `src/`.
+
+```
+core/     layout, terrain, palette, maths, projection tuning
+render/   bend shader, geometry builder, city, block archetypes, materials,
+          marker batching, chase camera, projection state
+vehicle/  raycast suspension, collision, truck mesh
+world/    routing graph, rivals, traffic, pedestrians
+game/     dispatch, modes, run state machine, persistence
+audio/    bus graph, engine, world sound, music, one-shots
+ui/       HUD, screens, joystick, bend tuner, stylesheet
+```
+
+The split that matters is not the folder names, it is this: **the bend never
+leaves `render/`.** Physics, audio, AI, routing and every rule run in ordinary
+unbent world space. That was always the plan, and building a whole game on top
+of it confirmed it — nothing outside the vertex shader ever needed to know the
+world was folding.
 
 ### Driving dynamics — raycast suspension (26 Aug — v0.5)
 
@@ -503,6 +563,161 @@ so the far plane came down from 6000 to 1400. That plus `polygonOffset` on the
 road surface is what stops pavements, lane dashes and the route ribbon from
 z-fighting after flattening squashes them into nearly the same plane.
 
+
+## Dispatch — the answer to open question #3 (28 Aug)
+
+This is the section the whole project has been circling. The question was:
+**what lives in the plan region that cannot live in the perspective region?**
+
+Roof tone encoding building height was a start, but it is scenery. The answer
+has to be a *decision the player can only make from above*. There are three
+now, and the important thing is that they compound.
+
+**1. Simultaneous orders.** Three to five drops are live at once, each with its
+own countdown, drawn as a ring of ticks on the ground. At street level you can
+see the one you are pointed at. From the map you can see all of them, with how
+long each has left, and choose an order to serve them in. Ticks rather than a
+smooth wedge, because ticks stay countable when the map scale shrinks them to a
+few pixels — a smooth arc just becomes a smudge.
+
+**2. A capacity limit.** The truck holds three crates and refills at a bakery.
+That is the piece that turns a list of objectives into a routing problem: you
+cannot simply chase whatever is nearest, you have to pick a *cluster* of three
+that one loop can serve, and then get back. A cluster is a shape, and a shape is
+only visible from above.
+
+**3. Rivals and closures.** Rival couriers race you for the same drops. Their
+chevron shows heading and, by its trail length, roughly their speed — so every
+order becomes "can I beat them there, and if not which of the others should I
+take instead". Road closures block edges of the graph; a closure two blocks
+ahead is invisible from the street and obvious from the map, and it changes
+which way you should already be turning.
+
+Because block interiors are drivable, a closure does not stop you — it pushes
+you onto the slow pavement cut-through. A cost, not a wall. That interaction
+between two features built weeks apart is the best thing in the game.
+
+### What this forced on the visual design
+
+**Anything that must be legible in both regions needs a component built for
+each.** This started as a note about the destination pillar and is now a rule
+the whole game obeys:
+
+| Thing | Street component | Map component |
+|---|---|---|
+| Objective | tall pillar beacon | flat ring + countdown ticks |
+| Rival | stubby beacon | chevron + trail |
+| Closure | bars across the carriageway | flat X |
+| Building | facade | roof tone, encoding height |
+| Route | ribbon under your wheels | ribbon running up the map |
+| Next turn | arrow painted on the road | (nothing — the map has the rest) |
+
+That last row is worth spelling out. The turn arrow handles the *immediate*
+junction, which frees the map to be about the decision **after** this one. That
+is the level the plan region is actually good at, and it was doing both jobs
+badly before.
+
+### Verdict on the open question
+
+It works, and the test in the phases document — *a player who cannot see the map
+region plays measurably worse* — is now obviously true rather than aspirational.
+Without the map you can still drive to the arrow. You cannot sequence three
+drops, you cannot tell which one a rival will reach first, and you will drive
+into a closure at speed.
+
+### Traffic earns its place by making the map expensive
+
+Traffic and pedestrians are not decoration. Reading the map means not reading
+the street, and traffic is what makes not reading the street cost you. That
+tension is the reason to have both regions in one frame at all — without it the
+plan view is free information and the game is just a driving game with a good
+minimap.
+
+## Block archetypes (28 Aug)
+
+Nine kinds now. The landmarks are designed as **shapes read from above first**
+and as things you drive past second, because once buildings lie flat the
+footprint and the roof tone are the only channels left.
+
+| Kind | What it is from above |
+|---|---|
+| buildings | one to four masses, the default texture of the city |
+| superblock | one big dark square |
+| podium | nested squares — the only shape that changes width as it rises |
+| market | a fine 3×3 grain nothing else has |
+| park | green with a white cross of paths, and trees |
+| lot | pale, ruled with bays |
+| shrine | a cross inside a square — the most findable shape in the tile |
+| works | an orange ring with an L-shaped crane |
+| dock | a dark hole |
+
+Roughly one block in eight is a landmark. A shrine on every corner is not a
+landmark, it is wallpaper.
+
+Two of them change how you drive rather than just how you navigate: the dock is
+the only block you cannot cut through, and the works hoarding makes its interior
+a trap rather than a shortcut — the one block you learn to go around.
+
+## Audio (28 Aug — Phase 2 done)
+
+Built as planned, entirely synthesised, no asset files. The bus graph and the
+signal chain are exactly as sketched in the development plan below.
+
+Things worth keeping from doing it:
+
+- **The fake gearbox is most of it.** There is no gearbox in the physics, so one
+  exists purely for the sound: revs sweep up, drop on a shift, sweep again. That
+  single detail is the difference between "a drone that rises" and "a vehicle
+  accelerating", and it took twenty lines.
+- Building the tone from the actual firing frequency — `rpm/60 × 1.5` for a
+  four-stroke triple, because it is a 660cc kei unit — is why it sounds like an
+  engine rather than a synthesiser doing an impression of one.
+- **Surface noise is a gameplay channel, not an ambience.** It is brighter and
+  louder off-road, so you can hear that you have left the carriageway without
+  looking down. In a game whose whole point is that you are reading somewhere
+  else, that matters more than it would anywhere else.
+- Rivals get panned drones; traffic gets one density hum. Twenty-six panned
+  engines is mud, one hum is a busy street. That is a mix decision before it is
+  a performance one.
+- Music is scheduled on the **audio clock** with the usual lookahead, never from
+  `requestAnimationFrame`. A phone dropping frames in a corner is exactly where
+  the groove must not wobble.
+- The positional-audio rule held: everything is fed unbent world coordinates, on
+  the copy of the city nearest the listener.
+
+Verified by measuring real RMS on the master bus across idle, power, cornering,
+pause and mute, rather than by assuming the graph was connected.
+
+## Performance (28 Aug)
+
+The stated risk was vertex count, and it was real: a bigger, more varied city
+across 25 tile copies reached 2.7M vertices a frame. Now 1.08M, with no visible
+difference, from two changes:
+
+- Vertical box subdivision dropped to 1 — see gotcha 10 above. Provably free.
+- Tile copies are culled in **player-local space**. Three.js's own frustum
+  culling is worse than useless here, because it tests the unbent position: it
+  hides what the bend has brought into view and keeps what it has taken out,
+  which is why everything bent has `frustumCulled = false`. But the bend only
+  ever moves a vertex along local z and inward, so a tile entirely behind the
+  truck or entirely past the fog cannot appear whatever the fold is doing.
+  Typically ten of the twenty-five drop out.
+
+Still unmeasured on a real mid-range phone. That remains the open risk.
+
+## Testing (28 Aug)
+
+42 headless tests, run with `npm test`. Nothing touches WebGL or the DOM.
+
+This is the same technique that found the four suspension bugs — running the
+thing headlessly and printing state over time beats driving it and guessing —
+turned into a net that stays. Worth having for: the rollover margin
+(`mu` below `track / (2 × comH)`), weight transfer actually transferring, no
+divergence anywhere on the terrain, frame-rate independence, terrain periodicity
+across the seam, closures never disconnecting the graph, rivals never
+double-booking an order, and a closure being something you hit rather than drive
+through while still leaving a way round.
+
 ## Building it out properly
 
 ### The constraint that decides everything
@@ -530,7 +745,8 @@ is purely a rendering concern, and it stays quarantined in the vertex stage.
 ### Decision (26 Aug): no engine, for now
 
 Evaluated Unity, Unreal, Godot, Armory3D/UPBGE and browser. **Staying in the
-browser with three.js.** The reasoning is in `kickoff.md`, but in short: this
+browser with three.js.** The full reasoning was in `kickoff.md`, which never made
+it into the repo; the short version: this
 game needs almost nothing an engine sells (no assets, ~300 lines of arcade
 physics, procedural geometry), while the bend costs you real engine features
 (culling, shadows, LOD, decals). And the deliverable being a URL matters.
@@ -702,70 +918,126 @@ like it is, that's the bug.
 Each phase ends with something playable. Don't start the next until the current
 one is committed and works.
 
-**Phase 0 — foundation**
-Repo, Vite, TypeScript, port the prototype into modules (structure is in
-`kickoff.md`). Deploy to Netlify so every commit publishes.
+**Phase 0 — foundation** — ✅ **done, 28 Aug**
+Repo, Vite, TypeScript, port the prototype into modules. Deploy to Netlify so
+every commit publishes.
 *Done when:* the current prototype runs from a URL, split across files, with
 nothing new added.
+*Note:* the deploy is the one part still outstanding. `npm run build` produces a
+static `dist/` that will drop onto Netlify, Pages or anything else unchanged.
 
-**Phase 1 — driving feel**
+**Phase 1 — driving feel** — ✅ **done**
 Raycast suspension, weight transfer, tyre slip curves, camera lag and roll.
 *Done when:* you'd enjoy driving around with no objective and no map.
+*That is what Free roam is for, and it passes.*
 
-**Phase 2 — audio spine**
+**Phase 2 — audio spine** — ✅ **done, 28 Aug**
 Bus architecture, layered engine sound, tyre and surface noise, spatial sources
 on unbent coordinates, first adaptive music stems.
 *Done when:* closing your eyes tells you roughly what the car is doing.
+*Revs, load, shifts, surface and slip are all audible. What is still missing is
+authored variety — every sound is a synthesis rule, and a few of them will
+eventually want a real recording behind them.*
 
-**Phase 3 — a city worth looking at**
+**Phase 3 — a city worth looking at** — 🟡 **mostly done, 28 Aug**
 More variety per tile, landmarks that read from above, junction markings, traffic
 if it earns its place. Speed-reactive bend tuned properly.
 *Done when:* driving a straight line for a minute doesn't reveal the repeat.
+*Nine archetypes, landmarks designed for the plan view, junction arrows, traffic
+and pedestrians are all in. But the honest answer to the completion test is
+still no: the tile is 522m and at 30 m/s that is seventeen seconds. Variety
+inside the tile makes each block distinct; it does not change the period.
+Fixing that properly means a bigger tile or a second tile that alternates, and
+either one is a real piece of work with a real vertex-count cost.*
 
-**Phase 4 — the game**
+**Phase 4 — the game** — ✅ **answered, 28 Aug**
 The open design question: what decision can a player only make because they can
 see both scales at once? This phase is design, not code, and it's the one that
 decides whether this is a game or a demo.
 *Done when:* a player who can't see the map region plays measurably worse.
+*See the Dispatch section above. Sequencing simultaneous orders under a capacity
+limit, judging races against rivals, and routing around closures are all
+decisions the street view cannot support. The phase that was flagged as the real
+risk turned out to be the one that made everything else make sense.*
 
-**Phase 5 — ship**
+**Phase 5 — ship** — 🟡 **started**
 PWA manifest, offline caching, performance pass on mid-range phones, Electron
 build and Steamworks integration if going to Steam, title and settings screens.
 *Done when:* someone else can find it, install it and play it without you there.
+*Manifest, icon and the title/pause/results/settings screens are in. Offline
+caching, the phone performance pass and anything Steam-shaped are not.*
 
 ### Risks worth watching
 
-- **Phase 4 is the real risk.** Phases 0–3 are known work. Phase 4 is invention,
-  and it's tempting to keep polishing the view instead of doing it.
+- ~~**Phase 4 is the real risk.**~~ Answered, 28 Aug — see Dispatch above. The
+  fear was right that it was tempting to keep polishing the view instead; the
+  thing that broke the deadlock was asking what *decision* the map supports,
+  rather than what information it shows.
 - **Motion sickness.** The speed-reactive bend is aggressive. Test on people who
   didn't build it, early, before more is built on top of it.
-- **Mobile performance.** Vertex count is the constraint here, not fill rate,
-  because the bend runs per vertex. Measure on a real mid-range phone rather than
-  a desktop browser's device emulator.
+- **Mobile performance.** Still the live one. Vertex count is the constraint,
+  not fill rate, because the bend runs per vertex. It is down from 2.7M to 1.08M
+  a frame and there is a City life toggle that removes traffic and pedestrians —
+  but nobody has yet put this on a real mid-range phone, and a desktop browser's
+  device emulator does not answer the question.
 - **Scope.** Everything above is achievable solo. Adding multiplayer, open-world
   streaming or a car roster is not.
 
 ## Files
 
-- `bent-city.html` — the entire game, one self-contained file. Open in any browser.
-- `kickoff.md` — how to take this from prototype to real project. Both paths.
-- `context.md` — this file.
+- `src/` — the game. See the module map under "Current state" above.
+- `tests/` — 42 headless tests over the rules, the physics and collision.
+- `bent-city.html` — the original single-file prototype, kept as the historical
+  record of where the bend came from. **It is no longer the game** and does not
+  receive changes; open it to see what v0.7 looked like, not to play.
+- `README.md` — how to run, build, test and deploy.
+- `context.md` — this file. The project's memory.
 
 ## Open design questions
 
-1. **Does the seam read?** Right now the transition from perspective to plan is
-   smooth but you can feel it. Is a *visible* seam actually better — an honest
-   horizon line the player learns to read?
-2. **Should the bend be dynamic?** Curl tighter at speed (more look-ahead) and
-   relax when slow or stopped. Risk: motion sickness.
-3. **What lives in the plan region that can't live in the perspective region?**
-   Roof tone now encodes building height, which is a start. It needs more:
-   other drivers, timers, competing objectives — things you can only judge from above.
-4. **Turning.** When you turn a corner, the whole map region swings. That's
-   either the best or the worst thing about this. Needs playtesting.
+1. **Does the seam read?** Still open, and now with more riding on it. The
+   transition from perspective to plan is smooth but you can feel it, and the
+   horizon is where two differently-tessellated surfaces meet — the white
+   slivers there took two separate fixes. Is a *visible* seam actually better —
+   an honest horizon line the player learns to read?
+2. **Should the bend be dynamic?** Built and shipped: it curls tighter at speed
+   and relaxes when stopped. The risk flagged here — motion sickness — is why
+   there is now a **Bend intensity** setting that scales the whole effect to
+   zero. Nobody outside this project has tested it yet, which is the point of
+   the risk.
+3. ~~**What lives in the plan region that can't live in the perspective
+   region?**~~ **Answered, 28 Aug.** Simultaneous orders with countdowns, a
+   capacity limit that turns them into a routing problem, rivals racing you for
+   them, and closures to route around. See the Dispatch section.
+4. **Turning.** When you turn a corner, the whole map region swings. Still
+   either the best or the worst thing about this, and still needs playtesting
+   rather than argument. `uLock` is at 0.10, which is a small drift — enough to
+   take the whip out of corners without the map feeling detached. The extremes
+   (0.00, heading-up and violent; 1.00, world-locked and calm but showing you
+   what is north rather than what is ahead) are both a slider away.
+5. **New: is the tile repeat actually a problem?** Nine archetypes make each
+   block distinct, but the period is still 522m. Nobody playing has complained
+   about it yet, because the route and the orders never repeat and those are
+   what you are looking at. It may be that the repeat only bothers the person
+   who knows it is there. Worth finding out before paying for a bigger tile.
 
 ## Next session
 
-Play it, note what feels wrong, and pick one of the open questions above to
-attack. My suggestion: #3 — the strategic region needs a reason to exist beyond
-looking cool.
+Phases 0, 1, 2 and 4 are done; 3 and 5 are partly done. The view is no longer
+the only thing under test, which changes what is worth doing next.
+
+My suggestion, in order:
+
+1. **Put it on a phone.** Both open risks — motion sickness from the
+   speed-reactive bend, and vertex-bound performance — need a real device and a
+   person who did not build it. Everything else is guessing. The settings that
+   would rescue either case (Bend intensity, City life) already exist, so this
+   is a measurement session, not a building one.
+2. **Deploy it.** `npm run build` gives a static `dist/`. The deliverable being
+   a URL was one of the reasons for staying in the browser, and right now it
+   still isn't one.
+3. **Tune the difficulty with someone else driving.** The numbers in
+   `game/modes.ts` — order lifetimes, rival speed, how much clock a delivery
+   pays back — were set by reasoning, not by playing. That is exactly the mistake
+   the bend defaults avoided by being sliders.
+4. Only then: open question 1 or 4, or the tile period.
