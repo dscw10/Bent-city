@@ -142,16 +142,17 @@ export function drawTurnArrow(
   const col = C.matcha;
   const s = Math.sin(heading), c = Math.cos(heading);
   // Shaft along the direction of travel.
-  b.slabRot(x, z, 2.4, 11, 0.14, heading, col, 2);
+  b.slabRot(x, z, 1.9, 9, 0.14, heading, col, 2);
 
   const head = heading + turn * Math.PI / 2;
-  const hx = x + s * 5.5, hz = z + c * 5.5;
+  const hx = x + s * 4.5, hz = z + c * 4.5;
   if (turn === 0) {
-    b.slabRot(hx + s * 2.0, hz + c * 2.0, 5.2, 5.2, 0.14, heading + Math.PI / 4, col, 1);
+    // A square turned 45° is an arrowhead, and costs one quad.
+    b.slabRot(hx + s * 1.6, hz + c * 1.6, 4.0, 4.0, 0.14, heading + Math.PI / 4, col, 1);
   } else {
-    // Bend the shaft round, then a head on the new direction.
-    b.slabRot(hx + Math.sin(head) * 3.0, hz + Math.cos(head) * 3.0, 2.4, 7.0, 0.14, head, col, 2);
-    const ax = hx + Math.sin(head) * 7.0, az = hz + Math.cos(head) * 7.0;
-    b.slabRot(ax, az, 4.4, 4.4, 0.14, head + Math.PI / 4, col, 1);
+    // Bend the shaft round, then put the head on the new direction.
+    b.slabRot(hx + Math.sin(head) * 2.6, hz + Math.cos(head) * 2.6, 1.9, 6.0, 0.14, head, col, 2);
+    const ax = hx + Math.sin(head) * 5.9, az = hz + Math.cos(head) * 5.9;
+    b.slabRot(ax, az, 3.6, 3.6, 0.14, head + Math.PI / 4, col, 1);
   }
 }

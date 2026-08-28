@@ -1,4 +1,4 @@
-import { GRID, PITCH, nodePos, wrap } from '../core/city-layout';
+import { GRID, PITCH, nodePos, wrap, nearCopy } from '../core/city-layout';
 
 /**
  * ============================ routing ============================
@@ -82,6 +82,27 @@ export function pathLength(path: Point[]): number {
     total += Math.hypot(path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]);
   }
   return total;
+}
+
+/**
+ * Re-express a path so its points are continuous around the reference point,
+ * rather than jumping a whole tile at the seam.
+ *
+ * Done SEQUENTIALLY — each point is unwrapped against the previous one, not
+ * against the reference. A route can be longer than half a tile, at which point
+ * unwrapping everything against a single origin folds the far end back on
+ * itself and the ribbon doubles over.
+ */
+export function unwrapPath(path: Point[], refX: number, refZ: number): Point[] {
+  if (path.length === 0) return path;
+  const out: Point[] = [];
+  let px = refX, pz = refZ;
+  for (const [x, z] of path) {
+    const ux = nearCopy(x, px), uz = nearCopy(z, pz);
+    out.push([ux, uz]);
+    px = ux; pz = uz;
+  }
+  return out;
 }
 
 /** Manhattan distance in grid steps — cheap ordering heuristic. */

@@ -39,6 +39,21 @@ export function wrapDist(ax: number, az: number, bx: number, bz: number): number
 }
 
 /**
+ * The copy of `v` nearest to `ref`, which may lie outside the home tile.
+ *
+ * Gameplay measures distance through the seam — an order 60m away across the
+ * wrap really is 60m away. Markers therefore have to be DRAWN through the seam
+ * too, on whichever copy of the city is nearest, or the HUD says 60m while the
+ * beacon sits half a city away in the home tile.
+ *
+ * This does not contradict the rule that the route never wraps: the route is
+ * still computed once, inside the home tile, and drawn once. It is only
+ * positioned on the copy you are actually standing in. Terrain is periodic over
+ * exactly one tile, so a marker moved by a whole tile lands at the same height.
+ */
+export const nearCopy = (v: number, ref: number): number => ref + wrapDelta(v, ref);
+
+/**
  * True if (x,z) is inside a block footprint rather than on the carriageway —
  * pavement, plaza or car park. All of it is drivable, but draggy and slippery,
  * so cutting a corner is a shortcut with a price.
