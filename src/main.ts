@@ -241,6 +241,7 @@ function tick(now: number): void {
   world.movers.end();
 
   world.setFrame(car.x, car.z, projection.aLag);
+  world.cullTiles(car.x, car.z, projection.aLag);
   world.render();
 }
 
@@ -287,6 +288,13 @@ if (import.meta.env.DEV) {
     routeLen: (game as unknown as { route: unknown[] }).route.length,
     markVerts: world.marks.builder.p.length / 3,
     moverVerts: world.movers.builder.p.length / 3,
-    audio: (audio as unknown as { audio: { ctx: AudioContext | null } }).audio.ctx?.state ?? 'none'
+    audio: (audio as unknown as { audio: { ctx: AudioContext | null } }).audio.ctx?.state ?? 'none',
+    drawnVerts: world.scene.children
+      .filter((o): o is import('three').Mesh => (o as import('three').Mesh).isMesh && o.visible)
+      .reduce((n, m) => n + (m.geometry.getAttribute('position')?.count ?? 0), 0),
+    kinds: world.city.kinds.flat().reduce<Record<string, number>>(
+      (acc, k) => { acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
+    blocks: world.city.blocks.length,
+    visibleTiles: world.visibleTiles
   });
 }

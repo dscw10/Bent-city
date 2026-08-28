@@ -79,7 +79,23 @@ export class Builder {
     // Subdivision only matters inside the transition band, so keep it modest.
     const sz_ = segZ ?? Math.max(2, Math.round(sz / 8));
     const sx_ = Math.max(2, Math.round(sx / 8));
-    const sy_ = Math.max(2, Math.round(sy / 10));
+
+    /* VERTICAL SUBDIVISION IS ALWAYS 1, and it is worth knowing why.
+     *
+     * Work through the bend for a fixed player-local z: the fold angle, the
+     * local scale, the flatten ramp and the point on the folded curve are all
+     * functions of z alone. Height then enters only as
+     *     y_out = pos.y + h·cos φ      z_out = z0 + pos.x − h·sin φ
+     * which is AFFINE in h. The map-lock twist is a rotation about Y, and its
+     * blend ramp is on radial distance in xz — neither touches y either.
+     *
+     * So subdividing a box vertically produces vertices that land exactly where
+     * the straight edge between the corners already goes. It was costing four
+     * to nine times the geometry of a tall building for no visible difference
+     * at all. Horizontal subdivision still matters: x and z do run through
+     * non-linear terms.
+     */
+    const sy_ = 1;
 
     this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], sx_, sy_, col, A);
     this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], sx_, sy_, col, A);

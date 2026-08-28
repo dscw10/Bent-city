@@ -42,10 +42,12 @@ export function buildCar(scene: THREE.Scene): CarMesh {
   // Cargo crates are separate objects so they can appear and disappear with the
   // load you are actually carrying — the bed being visibly empty or full is the
   // cheapest possible readout of game state, and it needs no HUD.
-  const crateSpots: Array<[number, number, number, number]> = [
-    [0.30, -0.35, 0.72, 0.52],
-    [-0.32, -0.98, 0.72, 0.52],
-    [0.28, -1.10, 1.06, 0.44]
+  // All three sit ON the bed floor (top at 0.72) rather than stacked. The
+  // stacked one used to float, because nothing was underneath it.
+  const crateSpots: Array<[x: number, z: number, y: number, size: number]> = [
+    [0.31, -0.28, 0.72, 0.52],
+    [-0.31, -0.28, 0.72, 0.52],
+    [0.00, -1.12, 0.72, 0.52]
   ];
   const cargo = crateSpots.map(([cx, cz, y, s]) => {
     const cb = new Builder();
