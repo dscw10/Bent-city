@@ -35,6 +35,8 @@ export interface FrameEvents {
   delivered: number;      // yen credited, 0 if none
   restocked: boolean;
   lost: boolean;          // an order expired or was sniped
+  expired: boolean;
+  snipedNow: boolean;
   scattered: number;      // pedestrians clipped
   ending: boolean;        // clock crossed into the last ten seconds this frame
 }
@@ -150,7 +152,8 @@ export class Game {
 
   update(dt: number, car: Car): FrameEvents {
     const out: FrameEvents = {
-      delivered: 0, restocked: false, lost: false, scattered: 0, ending: false
+      delivered: 0, restocked: false, lost: false,
+      expired: false, snipedNow: false, scattered: 0, ending: false
     };
     if (this.phase !== 'playing') return out;
 
@@ -225,6 +228,7 @@ export class Game {
         this.penalise();
         this.breakStreak('Order expired');
         out.lost = true;
+        out.expired = true;
         this.focusKey = '';
         break;
       case 'sniped':
@@ -232,6 +236,7 @@ export class Game {
         this.penalise();
         this.breakStreak('Beaten to it');
         out.lost = true;
+        out.snipedNow = true;
         this.focusKey = '';
         break;
       case 'restock':

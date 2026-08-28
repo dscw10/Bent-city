@@ -11,7 +11,8 @@ import type { ResultRow } from './ui/screens';
 import { Game } from './game/game';
 import type { Mode } from './game/modes';
 import { nodePos } from './core/city-layout';
-import { save, applySavedBend, captureBend } from './game/storage';
+import { save, applySavedBend, captureBend, persist } from './game/storage';
+import { GameAudio } from './audio';
 
 /* ---------------------------------------------------------------------------
    Bootstrap. Everything above this file is either rendering, physics or rules;
@@ -26,6 +27,7 @@ const car = makeCar();
 const carMesh = buildCar(world.scene);
 const hud = new Hud();
 const game = new Game();
+const audio = new GameAudio();
 
 game.bind(world.city.blocks);
 projection.intensity = save.settings.bendIntensity;
@@ -58,6 +60,12 @@ const screens = new Screens({
 
 function applySettings(): void {
   projection.intensity = save.settings.bendIntensity;
+  audio.setVolume(save.settings.volume);
+  audio.setMuted(save.settings.muted);
+  // Persist here rather than in each caller: the mute button and the M key
+  // both reach settings without going through the settings panel, and both
+  // silently failed to save before this.
+  persist();
   syncMuteButton();
   if (game.phase === 'playing' || game.phase === 'paused') game.refreshCityLife(car);
 }
@@ -76,6 +84,8 @@ function setPlayingChrome(on: boolean): void {
 }
 
 function startRun(mode: Mode): void {
+  // The Start button is the user gesture the AudioContext has been waiting for.
+  audio.begin(save.settings.volume, save.settings.muted);
   resetCar(car, START_X, START_Z, 0);
   projection.reset(car.a);
   world.chase.reset();
@@ -96,6 +106,7 @@ function pause(): void {
 
 function resume(): void {
   if (game.phase !== 'paused') return;
+  audio.resume();
   game.phase = 'playing';
   screens.hideAll();
   setPlayingChrome(true);
@@ -111,6 +122,7 @@ function toMenu(): void {
 }
 
 function showResults(): void {
+  audio.finish();
   const s = game.stats;
   const isBest = game.commitScore();
   const rows: ResultRow[] = [
@@ -145,7 +157,10 @@ muteBtn.addEventListener('click', () => {
   applySettings();
 });
 // A phone locking or the tab going away mid-run should not cost you the shift.
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pause();
+  else audio.resume();
+});
 
 // ---------- loop ----------
 let last = performance.now();
@@ -159,9 +174,11 @@ function tick(now: number): void {
   last = now;
 
   const live = game.phase === 'playing';
+  let throttle = 0;
 
   if (live) {
     const { thr, str } = keyboard.read(stick);
+    throttle = thr;
 
     // Three substeps: the springs are stiff and one big step goes unstable.
     const sub = dt / 3;
@@ -176,15 +193,31 @@ function tick(now: number): void {
 
     const ev = game.update(dt, car);
     carMesh.setCargo(game.crates);
+    audio.impact(impact);
 
-    if (ev.delivered > 0) { hud.flash(false); world.chase.addKick(0.5); }
+    if (ev.delivered > 0) {
+      hud.flash(false);
+      world.chase.addKick(0.5);
+      audio.delivered(game.multiplier);
+    }
+    if (ev.restocked) audio.restocked();
+    if (ev.expired) audio.expired();
+    if (ev.snipedNow) audio.sniped();
+    if (ev.scattered > 0) audio.scattered();
     if (ev.lost || ev.scattered > 0) hud.flash(true);
     for (const m of game.messages.splice(0)) hud.toast(m.text, m.bad);
+    audio.clock(game.clock, game.mode.duration === 0);
 
     if (game.phase === 'over') showResults();
   }
 
   carMesh.sync(car);
+
+  audio.update(
+    dt, car, throttle, live,
+    game.rivals.list, game.traffic,
+    GameAudio.musicState(car.v, game.clock, game.mode?.duration ?? 0, game.stats.streak)
+  );
 
   // The projection and camera keep running while paused, so the world behind
   // the menu stays alive rather than becoming a frozen screenshot.
@@ -221,8 +254,26 @@ syncMuteButton();
 screens.showTitle();
 requestAnimationFrame(tick);
 
-// Dev-only inspection hook, stripped from production builds by Vite.
+// Dev-only inspection hooks, stripped from production builds by Vite.
 if (import.meta.env.DEV) {
+  // Measures the real RMS on the master bus, so "is there actually sound"
+  // can be answered without a person and a pair of headphones.
+  let analyser: AnalyserNode | null = null;
+  (window as unknown as Record<string, unknown>).__level = () => {
+    const a = (audio as unknown as { audio: { ctx: AudioContext | null; master: GainNode } }).audio;
+    if (!a.ctx) return null;
+    if (!analyser) {
+      analyser = a.ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      a.master.connect(analyser);
+    }
+    const buf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    return Math.sqrt(sum / buf.length);
+  };
+
   (window as unknown as Record<string, unknown>).__dbg = () => ({
     phase: game.phase,
     orders: game.dispatch.orders.length,
@@ -235,6 +286,7 @@ if (import.meta.env.DEV) {
     focus: game.focus(car),
     routeLen: (game as unknown as { route: unknown[] }).route.length,
     markVerts: world.marks.builder.p.length / 3,
-    moverVerts: world.movers.builder.p.length / 3
+    moverVerts: world.movers.builder.p.length / 3,
+    audio: (audio as unknown as { audio: { ctx: AudioContext | null } }).audio.ctx?.state ?? 'none'
   });
 }
