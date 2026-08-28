@@ -1,0 +1,204 @@
+/* ---------------------------------------------------------------------------
+   Minimal, uppercase, wide tracking, tabular numerals.
+   Near-white concrete, cool grey shade, matcha green as the only accent, warm
+   melonpan for cargo. The HUD is deliberately quiet: the projection is the
+   thing you are meant to be reading, not the text on top of it.
+   --------------------------------------------------------------------------- */
+:root{
+  --paper:#EDEFF1;
+  --concrete:#FFFFFF;
+  --shadow:#9AA3AB;
+  --asphalt:#C8CDD2;
+  --ink:#12161A;
+  --matcha:#7FA650;
+  --melon:#E8C87A;
+  --rival:#C7574C;
+  --hazard:#DB8C38;
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--paper);
+  font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:var(--ink);
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+  overscroll-behavior:none}
+#stage{position:fixed;inset:0}
+canvas{display:block}
+
+/* ---- HUD ---- */
+.hud{position:fixed;inset:0;pointer-events:none;padding:calc(14px + var(--safe-t)) 16px 0;
+  opacity:0;transition:opacity .3s}
+.hud.on{opacity:1}
+.row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.stat{min-width:96px}
+.stat.mid{text-align:center;flex:1}
+.stat.right{text-align:right}
+.lbl{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--shadow);margin-bottom:2px}
+.val{font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.unit{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--shadow);margin-top:3px;
+  font-variant-numeric:tabular-nums}
+.stat.mid .val.low{color:var(--rival)}
+.bar{height:2px;background:rgba(154,163,171,.35);margin:6px auto 0;width:120px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:var(--ink);transform-origin:left center;
+  transition:transform .12s linear}
+.bar i.low{background:var(--rival)}
+.accent{color:var(--matcha)}
+.warn{color:var(--rival)}
+
+/* The order manifest. Each row is one live order; the map shows the same set
+   spatially. Reading them together is the game. */
+.manifest{position:fixed;left:16px;top:calc(96px + var(--safe-t));width:198px;
+  display:flex;flex-direction:column;gap:5px}
+.order{display:flex;align-items:center;gap:7px;padding:5px 7px;
+  background:rgba(255,255,255,.62);border-left:2.5px solid var(--matcha);
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  animation:slideIn .22s ease-out}
+.order.mine{border-left-color:var(--melon);background:rgba(255,255,255,.86)}
+.order.contested{border-left-color:var(--rival)}
+.order .tag{font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.order .t{font-variant-numeric:tabular-nums;color:var(--shadow)}
+.order .t.urgent{color:var(--rival);font-weight:700}
+.order .pip{width:6px;height:6px;border-radius:50%;background:var(--matcha);flex:none}
+.order.mine .pip{background:var(--melon)}
+.order.contested .pip{background:var(--rival)}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+
+.task{position:fixed;left:16px;right:16px;bottom:calc(194px + var(--safe-b));text-align:center}
+.task .what{font-size:13px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+.task .dist{font-size:11px;letter-spacing:.18em;color:var(--shadow);margin-top:4px;
+  font-variant-numeric:tabular-nums}
+
+.toast{position:fixed;left:0;right:0;top:38%;text-align:center;
+  font-size:15px;letter-spacing:.22em;text-transform:uppercase;font-weight:700;
+  opacity:0;transition:opacity .25s,transform .25s;transform:translateY(6px);pointer-events:none}
+.toast.on{opacity:1;transform:none}
+
+/* Without pointer-events:none this fixed inset:0 div silently eats every tap on
+   the page — steering and sliders both go dead, with no error to see. */
+.flash{position:fixed;inset:0;background:var(--matcha);opacity:0;transition:opacity .35s;
+  pointer-events:none}
+.flash.bad{background:var(--rival)}
+
+/* ---- joystick ---- */
+.sticks{position:fixed;left:0;right:0;bottom:0;height:180px;
+  display:flex;justify-content:center;align-items:flex-end;
+  padding:0 20px calc(26px + var(--safe-b));pointer-events:none;
+  opacity:0;transition:opacity .3s}
+.sticks.on{opacity:1}
+.stick{position:relative;width:148px;height:148px;border-radius:50%;
+  border:1.5px solid var(--shadow);background:rgba(255,255,255,.28);
+  backdrop-filter:blur(4px);pointer-events:auto;touch-action:none}
+.stick .axis{position:absolute;background:var(--shadow);opacity:.45}
+.stick .axis.h{left:16%;right:16%;top:50%;height:1px}
+.stick .axis.v{top:16%;bottom:16%;left:50%;width:1px}
+.knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;
+  border-radius:50%;background:var(--matcha);border:2.5px solid var(--ink);
+  transition:transform .12s ease-out}
+.stick.live .knob{transition:none}
+.cap{position:absolute;left:0;right:0;bottom:-19px;text-align:center;
+  font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--shadow);font-weight:600}
+
+/* ---- top bar ---- */
+.topbar{position:fixed;top:calc(14px + var(--safe-t));left:50%;transform:translateX(-50%);
+  display:flex;gap:6px;opacity:0;transition:opacity .3s;pointer-events:none}
+.topbar.on{opacity:1;pointer-events:auto}
+.chip{border:1.5px solid var(--ink);border-radius:2px;background:rgba(255,255,255,.6);
+  padding:7px 11px;font-size:10px;letter-spacing:.2em;font-weight:600;text-transform:uppercase;
+  cursor:pointer;color:var(--ink);font-family:inherit}
+.chip:hover{background:rgba(255,255,255,.9)}
+.chip.active{background:var(--matcha);border-color:var(--matcha);color:#fff}
+
+/* ---- tuner ---- */
+#tuner{position:fixed;top:calc(56px + var(--safe-t));left:50%;transform:translateX(-50%);
+  width:min(320px,calc(100% - 32px));max-height:calc(100vh - 280px);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border:1.5px solid var(--ink);
+  padding:14px;display:none;pointer-events:auto;z-index:30}
+#tuner.on{display:block}
+.ctrl{margin-bottom:12px}
+.ctrl label{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--shadow);margin-bottom:6px}
+.ctrl label b{color:var(--ink);font-variant-numeric:tabular-nums}
+.tuner-reset{width:100%;margin-top:2px;border:1.5px solid var(--ink);background:transparent;
+  padding:8px;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:600;
+  cursor:pointer;color:var(--ink);font-family:inherit}
+input[type=range]{width:100%;-webkit-appearance:none;appearance:none;background:transparent}
+input[type=range]::-webkit-slider-runnable-track{height:1.5px;background:var(--ink)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+  background:var(--matcha);border-radius:50%;margin-top:-7px}
+input[type=range]::-moz-range-track{height:1.5px;background:var(--ink)}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matcha);border:0;border-radius:50%}
+.hint{font-size:10px;line-height:1.55;color:var(--shadow);letter-spacing:.04em;margin-top:12px}
+.hint b{color:var(--ink)}
+
+/* ---- screens ---- */
+.screen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+  padding:24px;background:rgba(237,239,241,.92);backdrop-filter:blur(10px);z-index:40}
+.screen.on{display:flex;animation:fade .25s ease-out}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.sheet{width:min(420px,100%);max-height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.eyebrow{font-size:10px;letter-spacing:.32em;text-transform:uppercase;color:var(--matcha);
+  font-weight:700;margin-bottom:10px}
+.sheet h1{font-size:46px;line-height:.96;letter-spacing:-.035em;font-weight:600;margin-bottom:18px}
+.sheet h2{font-size:20px;letter-spacing:-.01em;font-weight:600;margin-bottom:18px}
+.blurb{font-size:13px;line-height:1.6;color:#5B646C;margin-bottom:22px;max-width:34ch}
+.bigscore{font-size:66px;font-weight:600;letter-spacing:-.045em;line-height:1;
+  font-variant-numeric:tabular-nums;margin-bottom:20px}
+
+.modes,.settings,.results{display:flex;flex-direction:column;gap:7px;margin-bottom:20px}
+.mode{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;text-align:left;
+  border:1.5px solid rgba(154,163,171,.55);background:transparent;cursor:pointer;
+  font-family:inherit;color:var(--ink)}
+.mode.sel{border-color:var(--ink);background:rgba(255,255,255,.8)}
+.mode .dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--shadow);
+  margin-top:3px;flex:none}
+.mode.sel .dot{background:var(--matcha);border-color:var(--matcha)}
+.mode .name{font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+.mode .desc{font-size:11px;line-height:1.5;color:#5B646C;margin-top:3px}
+
+.setting{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:9px 0;border-bottom:1px solid rgba(154,163,171,.3)}
+.setting .name{font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:600}
+.setting .sub{font-size:10px;color:var(--shadow);letter-spacing:.04em;margin-top:2px;line-height:1.45}
+.setting .ctl{flex:none;display:flex;align-items:center;gap:8px}
+.setting input[type=range]{width:104px}
+.setting .num{font-size:11px;font-variant-numeric:tabular-nums;color:var(--shadow);min-width:30px;
+  text-align:right}
+.toggle{width:42px;height:22px;border-radius:11px;border:1.5px solid var(--shadow);
+  background:transparent;position:relative;cursor:pointer;flex:none}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+  background:var(--shadow);transition:transform .16s,background .16s}
+.toggle[aria-pressed=true]{border-color:var(--matcha)}
+.toggle[aria-pressed=true]::after{transform:translateX(20px);background:var(--matcha)}
+
+.results .r{display:flex;justify-content:space-between;align-items:baseline;
+  padding:8px 0;border-bottom:1px solid rgba(154,163,171,.3);
+  font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+.results .r b{font-size:16px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.results .r.hi b{color:var(--matcha)}
+
+.primary,.ghost{display:block;width:100%;padding:14px;font-size:11px;letter-spacing:.26em;
+  text-transform:uppercase;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid var(--ink)}
+.primary{background:var(--ink);color:var(--paper);margin-bottom:8px}
+.primary:hover{background:#000}
+.ghost{background:transparent;color:var(--ink)}
+.ghost:hover{background:rgba(255,255,255,.7)}
+.best{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--shadow);
+  margin-top:14px;font-variant-numeric:tabular-nums}
+.keys{font-size:10px;letter-spacing:.1em;color:var(--shadow);margin-top:10px;line-height:1.7}
+.keys b{color:var(--ink);letter-spacing:.16em}
+
+@media (max-width:420px){
+  .manifest{width:150px;top:calc(92px + var(--safe-t))}
+  .val{font-size:28px}
+  .sheet h1{font-size:38px}
+  .bigscore{font-size:54px}
+}
+/* On a short landscape phone the joystick and the manifest collide. */
+@media (max-height:520px){
+  .manifest{top:calc(76px + var(--safe-t));width:150px}
+  .task{bottom:calc(150px + var(--safe-b))}
+  .sticks{height:140px}
+  .stick{width:118px;height:118px}
+  .knob{width:46px;height:46px;margin:-23px 0 0 -23px}
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#EDEFF1"/>
+  <!-- the fold, as the logo: a street that curls up into a map -->
+  <path d="M176 512 L336 512 L300 300 Q256 232 212 300 Z" fill="#C8CDD2"/>
+  <path d="M212 300 Q256 232 300 300 L300 128 L212 128 Z" fill="#9AA3AB"/>
+  <rect x="244" y="128" width="24" height="40" fill="#EDEFF1"/>
+  <rect x="244" y="196" width="24" height="40" fill="#EDEFF1"/>
+  <rect x="128" y="128" width="64" height="108" fill="#FFFFFF"/>
+  <rect x="320" y="128" width="64" height="108" fill="#FFFFFF"/>
+  <rect x="212" y="372" width="88" height="64" rx="4" fill="#7FA650"/>
+  <rect x="228" y="340" width="56" height="44" rx="4" fill="#FFFFFF"/>
+</svg>

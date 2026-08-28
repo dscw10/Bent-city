@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#EDEFF1">
+<meta name="description" content="An arcade delivery game whose city folds up in front of you: street-level perspective near the truck, top-down map far ahead, in one continuous view.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<title>Melonpan Delivery Service</title>
+<link rel="stylesheet" href="./src/ui/style.css">
+</head>
+<body>
+<div id="stage"></div>
+
+<!-- ================= HUD ================= -->
+<div class="hud" id="hud">
+  <div class="row">
+    <div class="stat">
+      <div class="lbl">Speed</div>
+      <div class="val" id="speed">0</div>
+      <div class="unit">km/h</div>
+    </div>
+    <div class="stat mid">
+      <div class="lbl">Time</div>
+      <div class="val" id="clock">0:00</div>
+      <div class="bar"><i id="clockBar"></i></div>
+    </div>
+    <div class="stat right">
+      <div class="lbl">Yen</div>
+      <div class="val" id="score">0</div>
+      <div class="unit" id="combo">&nbsp;</div>
+    </div>
+  </div>
+
+  <!-- The manifest: every live order at once. This is the HUD half of the
+       answer to "what lives in the plan region"; the map is the other half. -->
+  <div class="manifest" id="manifest"></div>
+
+  <div class="task">
+    <div class="what" id="what">Collect the melonpan</div>
+    <div class="dist" id="dist">&mdash;</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- ================= controls ================= -->
+<div class="sticks" id="sticks">
+  <div class="stick" id="stickL">
+    <div class="axis h"></div><div class="axis v"></div><div class="knob"></div>
+    <div class="cap">Steer &middot; Throttle &middot; Brake</div>
+  </div>
+</div>
+
+<div class="topbar" id="topbar">
+  <button id="pauseBtn" class="chip" aria-label="Pause">Pause</button>
+  <button id="tuneBtn" class="chip">Tune the bend</button>
+  <button id="muteBtn" class="chip" aria-pressed="false">Sound on</button>
+</div>
+
+<div id="tuner"></div>
+
+<!-- ================= screens ================= -->
+<div class="screen" id="titleScreen">
+  <div class="sheet">
+    <div class="eyebrow">Melonpan</div>
+    <h1>Delivery<br>Service</h1>
+    <p class="blurb">
+      The city folds up in front of you. The street under your wheels is
+      life size; everything past the horizon is a map. You never look away.
+    </p>
+    <div class="modes" id="modeList"></div>
+    <button class="primary" id="startBtn">Start shift</button>
+    <div class="best" id="titleBest"></div>
+    <div class="keys">
+      <b>WASD</b> or arrows to drive &middot; <b>Space</b> brake &middot;
+      <b>Esc</b> pause &middot; <b>M</b> mute &middot; <b>T</b> tuner
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="pauseScreen">
+  <div class="sheet">
+    <div class="eyebrow">Paused</div>
+    <h2 id="pauseSub">Shift in progress</h2>
+    <div class="settings" id="settingsList"></div>
+    <button class="primary" id="resumeBtn">Resume</button>
+    <button class="ghost" id="quitBtn">End shift</button>
+  </div>
+</div>
+
+<div class="screen" id="resultScreen">
+  <div class="sheet">
+    <div class="eyebrow" id="resultEyebrow">Shift over</div>
+    <div class="bigscore" id="resultScore">0</div>
+    <div class="results" id="resultRows"></div>
+    <button class="primary" id="againBtn">Run it again</button>
+    <button class="ghost" id="menuBtn">Back to title</button>
+  </div>
+</div>
+
+<div class="flash" id="flash"></div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

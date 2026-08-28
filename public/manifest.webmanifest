@@ -1,0 +1,14 @@
+{
+  "name": "Melonpan Delivery Service",
+  "short_name": "Melonpan",
+  "description": "An arcade delivery game whose city folds up in front of you: street-level perspective near the truck, top-down map far ahead, in one continuous view.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#EDEFF1",
+  "theme_color": "#EDEFF1",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
