@@ -18,8 +18,13 @@ export interface Settings {
   muted: boolean;
   /** Scales the speed-reactive bend. 0 makes the projection completely static. */
   bendIntensity: number;
-  /** Show traffic and pedestrians. Off is a meaningful performance lever. */
-  cityLife: boolean;
+  /**
+   * Other vehicles on the road. Off by default for now: they were getting in
+   * the way of tuning the driving, and the driving is the thing under test.
+   */
+  traffic: boolean;
+  /** Pedestrians on the pavements. Also the cheaper half of the crowd. */
+  pedestrians: boolean;
   /**
    * Steering feel, 0 calm to 1 lively. Not an accuracy setting — it moves the
    * steering rate limit, the yaw inertia and the yaw damping together, because
@@ -49,7 +54,8 @@ const DEFAULTS: SaveData = {
     volume: 0.75,
     muted: false,
     bendIntensity: 1,
-    cityLife: true,
+    traffic: false,
+    pedestrians: true,
     steering: 0.28,
     turnArrows: true,
     bend: { ...DEFAULT_BEND }

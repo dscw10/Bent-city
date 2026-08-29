@@ -733,6 +733,73 @@ Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
 
+## Mario Kart drift, tyre smoke, traffic off (29 Aug)
+
+### The hop is not decoration
+
+Pressing drift now hops the truck — a single vertical impulse, and nothing about
+it is special-cased. The wheels genuinely leave the ground, so the suspension
+unloads, the tyres lose grip for a moment and the truck lands already rotating.
+The raycast model gives all of that for free. Peak height about 0.36m, in the
+air for roughly 0.4s.
+
+**The direction you are steering AS IT LANDS is the drift you get.** That makes
+entry a deliberate flick rather than a button you hold and hope.
+
+### Counter-steer, and why it needed a destabilising torque
+
+Cutting the rear grip is not enough to sustain a slide on its own. Measured, the
+first attempt did nothing much: enter the drift, let go, and the truck tracked
+straight at 2° of slip. A drift was something you had to keep provoking.
+
+So a locked drift now carries a constant yaw torque pushing the slide FURTHER
+out (`V.driftYaw`). Do nothing and it walks you into a spin; counter-steer and
+you hold the angle. That is the whole loop:
+
+| input after entry | outcome |
+|---|---|
+| nothing | slip grows −7° → −19° → −37° → −58°, **spins out at 1.5s**, charge lost |
+| steady counter 0.5 | over-corrects, settles at 7°, earns nothing |
+| tracking counter-steer | holds −36°, charges to full in 3s |
+| steering further in | spins out faster |
+
+Charge builds fastest in a sweet band around 32°, falling off either side — so
+the reward is for holding an angle, not for provoking the biggest slide you can.
+
+**A sign error worth remembering.** `driftDir` was first taken as the NEGATION
+of the entry steering, which inverts `into` and `counter`. The symptom is
+horrible: the drift still works and still feels fine, but it is being held by
+the "steering further in" branch while the code believes it is counter-steer.
+Only visible by printing both and checking they matched the input. `driftDir` is
+the sign of the steering that entered it, so the two read directly off the player.
+
+**And the same substep bug, twice.** `spunOut` was cleared at the top of
+`stepVehicle`, which runs three times a frame — so a spin detected in the first
+substep was wiped by the second before the game ever saw it. Identical to the
+`boostFired` bug from earlier the same day. Anything set inside `stepVehicle`
+for the caller to read must be cleared BY the caller.
+
+### Tyre smoke, and why it is not a billboard
+
+Flat ground-hugging quads, not camera-facing sprites. **Billboards are one of
+the things the bend breaks**: a sprite turned to face the camera is turned in
+unbent space, so once the world folds it is facing the wrong way, or edge-on, or
+inside out. Flat quads bend like everything else — which also means the smoke
+lies down onto the map with the rest of the world.
+
+It dies by SHRINKING rather than fading, and that is a palette decision. There is
+no alpha in the marks batch, and giving smoke its own transparent pass would put
+a per-vertex alpha on every vertex of the city to serve ninety quads. Fading a
+colour only works if you know what is behind it, and smoke lands on road,
+pavement and grass alike. So it is near-white — brighter than any of them, in a
+palette whose road is 0.76 — and it goes away by getting smaller. The first
+attempt was grey fading to paper and was invisible against a grey road.
+
+### Traffic off
+
+Now its own setting, defaulting off, split from pedestrians. It was getting in
+the way of tuning the driving, and the driving is what is under test.
+
 ## Corners, bouncing, and drifting on the gas (29 Aug)
 
 Chris, still on the iPad: *"I still want the go button but I think the player

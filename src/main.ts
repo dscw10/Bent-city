@@ -99,6 +99,7 @@ function startRun(mode: Mode): void {
   resetCar(car, START_X, START_Z, 0);
   projection.reset(car.a);
   world.chase.reset();
+  world.smoke.clear();
   hud.clearOrders();
   game.start(mode, car);
   carMesh.setCargo(game.crates);
@@ -260,6 +261,7 @@ function tick(now: number): void {
     const blocks = game.collisionSet();
     let impact = 0;
     car.boostFired = 0;
+    car.spunOut = false;
     for (let i = 0; i < 3; i++) {
       stepVehicle(car, sub, thr, str, drift);
       impact = Math.max(impact, collideBlocks(car, blocks));
@@ -269,6 +271,12 @@ function tick(now: number): void {
       pads.rumble(220, 0.55);
       audio.boost(car.boostFired);
     }
+    if (car.spunOut) {
+      hud.toast('Spun out', true);
+      pads.rumble(260, 0.4);
+      audio.scattered();
+    }
+    world.smoke.update(dt, car);
     touch.setCharge(car.driftCharge);
     touch.setBoosting(car.boost > 0);
     car.impact = impact;
@@ -320,7 +328,10 @@ function tick(now: number): void {
   }
 
   const marks = world.marks.begin();
-  if (game.phase !== 'title') game.drawMarks(marks, car);
+  if (game.phase !== 'title') {
+    game.drawMarks(marks, car);
+    world.smoke.draw(marks, car.x, car.z);
+  }
   world.marks.end();
 
   const movers = world.movers.begin();
@@ -419,6 +430,8 @@ if (import.meta.env.DEV) {
       (acc, k) => { acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
     blocks: world.city.blocks.length,
     visibleTiles: world.visibleTiles,
+    smoke: world.smoke.count,
+    traffic2: game.traffic.cars.length,
     bend: { ...P },
     car2: {
       drifting: car.drifting, driftCharge: car.driftCharge,

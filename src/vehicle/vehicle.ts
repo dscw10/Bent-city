@@ -103,21 +103,50 @@ export const V = {
    * through the friction circle would do almost nothing in exactly the corner
    * you just earned it in. Same category of arcade device as `assist`, and
    * marked as such rather than dressed up. */
-  driftGrip: 0.82,        // rear mu while drifting
-  driftCorner: 0.70,      // rear cornering stiffness while drifting
-  driftAssist: 0.45,      // how much of the assist survives a drift
-  /**
-   * Slip angle, in radians, beyond which the assist comes back hard regardless
-   * of the drift button.
+  driftGrip: 0.74,        // rear mu once locked into a drift
+  driftCorner: 0.58,      // rear cornering stiffness once locked
+  driftAssist: 0.22,      // how much of the assist survives a drift
+
+  /* ---- entering a drift: the hop ----
    *
-   * Without this a drift is not a drift, it is a spin: holding one button with
-   * no counter-steer took the truck through 160° and out the other side,
-   * travelling backwards. Real drifting is held on the steering, and a player
-   * with a thumb on a phone has not got the input resolution for that — so the
-   * car catches itself at the far edge instead. Same family of arcade device as
-   * `assist`, and for the same reason.
+   * Pressing drift makes the truck hop. That is not decoration: the wheels
+   * genuinely leave the ground, so the suspension unloads, the tyres lose their
+   * grip for a moment and the truck comes down already rotating. The suspension
+   * model gives all of that for free from one vertical impulse — nothing about
+   * the hop is special-cased.
+   *
+   * The direction you are steering AS IT LANDS is the direction the drift locks
+   * into, which is what makes entry a deliberate flick rather than a button you
+   * hold hopefully. */
+  hopSpeed: 1.7,
+  /** Below this you cannot start a drift; a hop from walking pace is not a drift. */
+  driftMinSpeed: 7,
+
+  /* ---- holding a drift: counter-steer ----
+   *
+   * Once locked, the truck keeps rotating on its own. Steering INTO the slide
+   * deepens it, steering AGAINST it — counter-steering — is what holds the
+   * angle. Do nothing and the slip keeps growing until you spin out and lose
+   * the charge, so a drift is something you fly rather than something you hold.
    */
-  driftCatch: 0.50,
+  counterAuthority: 6.5,
+  /** Assist multiplier while steering further into the slide. */
+  driftInto: 0.35,
+  /** Slip angle at which the drift is lost and the charge with it. */
+  driftSpin: 1.20,
+  /** Charge builds fastest at this slip angle, and falls off either side. */
+  driftSweet: 0.55,
+  driftSweetWidth: 0.45,
+  /**
+   * Yaw torque pushing the slide FURTHER out, all the time the drift is locked.
+   *
+   * This is what makes counter-steer necessary rather than optional. Without
+   * it, cutting the rear grip is not enough to sustain a slide on its own — the
+   * truck simply tracked straight and a drift was something you had to keep
+   * provoking. With it, doing nothing walks you into a spin, and holding the
+   * angle is an active job.
+   */
+  driftYaw: 2600,
   /**
    * Body slip angle, in radians, above which a drift counts as a drift.
    *
@@ -199,8 +228,23 @@ export interface Car {
   offroad: boolean;
   /** Current front road-wheel angle. Rate limited, so it lags the input. */
   steer: number;
-  /** True while the drift input is held AND the truck is actually sliding. */
+  /**
+   * 'hop' from the moment drift is pressed until the wheels are back down;
+   * 'locked' once a direction has been committed to.
+   */
+  driftPhase: 'none' | 'hop' | 'locked';
+  /** Which way the locked drift goes: −1 or +1. */
+  driftDir: number;
+  /** True while locked into a drift. */
   drifting: boolean;
+  /** Previous frame's drift input, for edge detection inside the substeps. */
+  driftWasHeld: boolean;
+  /**
+   * Set when a drift is spun out and lost. Like `boostFired`, the CALLER clears
+   * it — clearing it here meant a spin in the first of the three substeps was
+   * wiped by the second before the game ever saw it.
+   */
+  spunOut: boolean;
   /** 0..1 how much boost the current drift has earned. */
   driftCharge: number;
   /** Seconds of boost left to spend. */
@@ -225,7 +269,11 @@ export function makeCar(): Car {
     slipRatio: [0, 0, 0, 0],
     steer: 0,
     offroad: false,
+    driftPhase: 'none',
+    driftDir: 0,
     drifting: false,
+    driftWasHeld: false,
+    spunOut: false,
     driftCharge: 0,
     boost: 0,
     boostFired: 0,
@@ -242,7 +290,11 @@ export function resetCar(car: Car, x: number, z: number, a: number): void {
   car.load.fill(0);
   car.slipRatio.fill(0);
   car.steer = 0;
+  car.driftPhase = 'none';
+  car.driftDir = 0;
   car.drifting = false;
+  car.driftWasHeld = false;
+  car.spunOut = false;
   car.driftCharge = 0;
   car.boost = 0;
   car.boostFired = 0;
@@ -264,16 +316,36 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   car.offroad = off;
   const mu = V.mu * (off ? 0.66 : 1);
 
-  /* ---- drift ----
-     The button alone is not a drift. It has to actually break the back away,
-     which means it only counts above walking pace — otherwise you could sit
-     still with the button held and charge a boost out of nothing. */
+  /* ---- drift: hop in, counter-steer to hold ----
+     See the notes on V.hopSpeed and V.counterAuthority. The state machine is
+     here rather than in the caller because it has to see the suspension loads,
+     which are what tell it the wheels have landed. */
   const planar = Math.hypot(car.vx, car.vz);
-  const bodySlip = planar > 1
-    ? Math.abs(shortAngle(car.a - Math.atan2(car.vx, car.vz)))
+  const slipSigned = planar > 1
+    ? shortAngle(car.a - Math.atan2(car.vx, car.vz))
     : 0;
-  const driftHeld = drift && planar > 6;
+  const bodySlip = Math.abs(slipSigned);
+  const pressed = drift && !car.driftWasHeld;
+  car.driftWasHeld = drift;
+
+  if (!drift && car.driftPhase !== 'none') {
+    car.driftPhase = 'none';
+    car.driftDir = 0;
+  } else if (pressed && car.driftPhase === 'none' && planar > V.driftMinSpeed) {
+    // The hop is a plain vertical impulse. Everything that makes it useful —
+    // unloaded springs, no tyre grip, landing already rotating — falls out of
+    // the suspension model on its own.
+    car.vy += V.hopSpeed;
+    car.driftPhase = 'hop';
+  }
+
+  const driftHeld = car.driftPhase === 'locked';
   car.drifting = driftHeld;
+
+  /* Counter-steer: positive when steering AGAINST the slide. This is what
+     holds the angle; without it the slip keeps growing to a spin. */
+  const counter = driftHeld ? clamp(-car.driftDir * str, 0, 1) : 0;
+  const into = driftHeld ? clamp(car.driftDir * str, 0, 1) : 0;
 
   const speed = car.vx * fx + car.vz * fz;
 
@@ -408,6 +480,12 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   tPitch += Ffwd * V.comH;
   tRoll += Flft * V.comH;
 
+  // The destabilising torque that makes a locked drift something you have to
+  // fly. See the note on V.driftYaw.
+  if (driftHeld) {
+    tYaw -= car.driftDir * V.driftYaw * clamp(planar / 18, 0, 1);
+  }
+
   // Gravity's component along the hillside — climbs cost speed, descents pay it back.
   const [gx, gz] = slopeAt(car.x, car.z);
   Fx -= V.mass * 9.81 * gx;
@@ -458,24 +536,59 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
     // Whichever end of the axis we are actually travelling along.
     const axis = Math.abs(toNose) > Math.PI / 2 ? car.a + Math.PI : car.a;
     const offA = Math.atan2(Math.sin(axis - vdir), Math.cos(axis - vdir));
-    /* Part of the assist switches off in a drift — that is what lets the back
-       step out. But it ramps back in past `driftCatch`, so the slide is bounded
-       and comes back to you instead of spinning. */
-    let rate = V.assist * (driftHeld ? V.driftAssist : 1);
-    if (bodySlip > V.driftCatch) {
-      rate += ((bodySlip - V.driftCatch) / V.driftCatch) * V.assist * 3;
+    /* Most of the assist switches off in a drift, so the back stays out. What
+       brings it back is COUNTER-STEER, not a timer: steer against the slide and
+       the truck gathers itself, steer further into it and it goes further. */
+    let rate = V.assist;
+    if (driftHeld) {
+      rate = V.assist * (V.driftAssist * (1 - into * (1 - V.driftInto)))
+        + counter * V.counterAuthority;
     }
     const na = vdir + offA * Math.min(1, rate * h);
     car.vx = Math.sin(na) * spd2;
     car.vz = Math.cos(na) * spd2;
   }
 
-  /* Charge only while genuinely sideways, so holding the button through a
-     straight does nothing. Releasing cashes it in — and a stab too short to
-     have earned anything is worth nothing rather than a little. */
-  if (driftHeld && bodySlip > V.driftSlip) {
-    car.driftCharge = Math.min(1, car.driftCharge + h / V.driftChargeTime);
-  } else if (!driftHeld && car.driftCharge > 0) {
+  /* ---- land the hop, then hold or lose the drift ---- */
+  const grounded2 = load[0] + load[1] + load[2] + load[3] > 0;
+
+  if (car.driftPhase === 'hop' && grounded2 && car.vy <= 0) {
+    /* Committed on landing. The direction you are steering as the wheels touch
+       down is the drift you get — which makes entry a deliberate flick rather
+       than a button you hold and hope. Steering nothing falls back to whichever
+       way the truck is already rotating, so a hop mid-corner still works. */
+    /* NOTE THE SIGN. driftDir is the sign of the STEERING that entered it, so
+       that `into` and `counter` below read directly off the player's input.
+       Deriving it from the resulting slip instead inverts both of them, and the
+       symptom is subtle: the drift still works, but it is being held by the
+       "steering further in" branch while the code believes it is counter-steer. */
+    const want = Math.abs(str) > 0.15 ? Math.sign(str) : -Math.sign(car.yaw);
+    if (want !== 0 && planar > V.driftMinSpeed) {
+      car.driftPhase = 'locked';
+      car.driftDir = want;
+    } else {
+      car.driftPhase = 'none';
+    }
+  }
+
+  if (car.driftPhase === 'locked') {
+    if (bodySlip > V.driftSpin) {
+      // Gone too far. The drift is lost and the charge with it — that is the
+      // cost of not catching it.
+      car.driftPhase = 'none';
+      car.driftDir = 0;
+      car.driftCharge = 0;
+      car.spunOut = true;
+    } else {
+      /* Charge builds fastest in a sweet band of slip angle. Not sideways
+         enough earns nothing; on the edge of a spin earns nearly nothing
+         either, so the reward is for holding the angle rather than for
+         surviving the biggest slide you can provoke. */
+      const q = bodySlip < V.driftSlip ? 0
+        : clamp(1 - Math.abs(bodySlip - V.driftSweet) / V.driftSweetWidth, 0, 1);
+      car.driftCharge = Math.min(1, car.driftCharge + (h * q) / V.driftChargeTime);
+    }
+  } else if (car.driftCharge > 0) {
     if (car.driftCharge >= V.driftMinCharge) {
       car.boostFired = car.driftCharge;
       car.boost = car.driftCharge * V.boostTime;

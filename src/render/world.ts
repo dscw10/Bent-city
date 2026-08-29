@@ -5,6 +5,7 @@ import { bentGlow, bentMat } from './materials';
 import { buildCity, buildRoadSurface } from './city';
 import type { CityData } from './city';
 import { MarkerBatch } from './marker-batch';
+import { Smoke } from './smoke';
 import { ChaseCamera } from './chase-camera';
 
 /**
@@ -24,6 +25,8 @@ export class World {
   readonly marks: MarkerBatch;
   /** Lit movers: traffic and pedestrians, which must read as objects. */
   readonly movers: MarkerBatch;
+  /** Tyre smoke. Flat quads, because the bend breaks camera-facing billboards. */
+  readonly smoke = new Smoke();
 
   constructor(stage: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });

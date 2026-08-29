@@ -97,8 +97,8 @@ export class Game {
     this.dispatch.start(mode);
     this.rivals.start(this.dispatch, mode.rivals);
     this.traffic.setClosures(this.dispatch.closedEdges);
-    this.traffic.start(save.settings.cityLife ? TRAFFIC_COUNT : 0, car.x, car.z);
-    this.pedestrians.start(save.settings.cityLife ? PEDESTRIAN_COUNT : 0, car.x, car.z);
+    this.traffic.start(save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
+    this.pedestrians.start(save.settings.pedestrians ? PEDESTRIAN_COUNT : 0, car.x, car.z);
 
     this.route = [];
     this.routeTimer = 0;
@@ -106,11 +106,10 @@ export class Game {
     this.messages.length = 0;
   }
 
-  /** Rebuild the crowd when the City life setting is toggled mid-run. */
+  /** Rebuild the crowd when either setting is toggled mid-run. */
   refreshCityLife(car: Car): void {
-    const on = save.settings.cityLife;
-    this.traffic.start(on ? TRAFFIC_COUNT : 0, car.x, car.z);
-    this.pedestrians.start(on ? PEDESTRIAN_COUNT : 0, car.x, car.z);
+    this.traffic.start(save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
+    this.pedestrians.start(save.settings.pedestrians ? PEDESTRIAN_COUNT : 0, car.x, car.z);
   }
 
   end(): void {
@@ -170,8 +169,8 @@ export class Game {
 
     // --- world ---
     this.traffic.setClosures(this.dispatch.closedEdges);
-    if (save.settings.cityLife) {
-      this.traffic.update(dt, car.x, car.z);
+    if (save.settings.traffic) this.traffic.update(dt, car.x, car.z);
+    if (save.settings.pedestrians) {
       const hits = this.pedestrians.update(dt, car.x, car.z, car.v);
       if (hits > 0) {
         out.scattered = hits;
@@ -372,9 +371,8 @@ export class Game {
 
   /** Traffic and pedestrians go into the lit batch, so they read as objects. */
   drawMovers(b: Builder, car: Car): void {
-    if (!save.settings.cityLife) return;
-    this.traffic.draw(b, car.x, car.z);
-    this.pedestrians.draw(b, car.x, car.z);
+    if (save.settings.traffic) this.traffic.draw(b, car.x, car.z);
+    if (save.settings.pedestrians) this.pedestrians.draw(b, car.x, car.z);
   }
 
   /**

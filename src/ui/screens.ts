@@ -162,9 +162,15 @@ export class Screens {
     ));
 
     list.appendChild(this.toggleRow(
-      'City life', 'Traffic and pedestrians. Turn off for a clearer view, or on a slower phone.',
-      () => save.settings.cityLife,
-      v => { save.settings.cityLife = v; persist(); this.cb.onSettingsChanged(); }
+      'Traffic', 'Other vehicles on the road. Off while the driving is being tuned.',
+      () => save.settings.traffic,
+      v => { save.settings.traffic = v; persist(); this.cb.onSettingsChanged(); }
+    ));
+
+    list.appendChild(this.toggleRow(
+      'Pedestrians', 'People on the pavements. The cheaper half of the crowd, and the biggest single frame-rate lever on a slow device.',
+      () => save.settings.pedestrians,
+      v => { save.settings.pedestrians = v; persist(); this.cb.onSettingsChanged(); }
     ));
 
     list.appendChild(this.sliderRow(

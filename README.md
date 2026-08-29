@@ -78,18 +78,27 @@ to 24 where the calm end holds 28.
 
 ### Drift and boost
 
-Hold drift through a corner and the back steps out: it takes grip and cornering
-stiffness off the **rear axle only**, and turns most of the arcade grip assist
-off, so the truck stops catching itself. The ring around the button fills while
-you are genuinely sideways — holding the button down a straight earns
-essentially nothing — and releasing cashes it in for a boost.
+Press drift and the truck **hops**. That is not decoration: the wheels really
+leave the ground, so the suspension unloads, the tyres lose grip for a moment
+and the truck lands already rotating — all of it falling out of the raycast
+suspension from one vertical impulse. **The direction you are steering as it
+lands is the drift you get**, so entry is a deliberate flick.
 
-The slide is bounded on purpose. With one button and no counter-steer an
-unbounded drift takes the truck through 160° and out the other side travelling
-backwards, so the assist ramps back in past about 29° of slip and the car comes
-back to you. Boost is the one place a force is applied to the body rather than
-through the tyres, because a boost that went through the friction circle would
-do almost nothing in exactly the corner you just earned it in.
+Once locked, a constant yaw torque pushes the slide further out, so **you have
+to counter-steer to hold it**. Do nothing and you spin out in about a second and
+a half and lose the charge. Over-correct and the slide dies and earns nothing.
+Charge builds fastest around 32° of slip, so the reward is for holding an angle
+rather than for provoking the biggest slide you can.
+
+Releasing cashes the charge in as a boost. Boost is the one place a force is
+applied to the body rather than through the tyres, because a boost that went
+through the friction circle would do almost nothing in exactly the corner you
+just earned it in.
+
+Tyre smoke is flat ground-hugging quads rather than camera-facing sprites —
+**billboards are one of the things the bend breaks**, since a sprite turned to
+face the camera is turned in unbent space and ends up facing the wrong way once
+the world folds.
 
 Load three crates of melonpan at a bakery, then deliver them. Several orders
 are live at once, each with its own countdown; rival couriers are racing you for
