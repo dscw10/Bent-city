@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run dev` | Vite dev server with hot reload |
 | `npm run build` | Typecheck, then build a static site into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
-| `npm test` | 125 headless tests over the rules, the physics, collision and the pass |
+| `npm test` | 129 headless tests over the rules, the physics, collision and the pass |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run check` | Typecheck and tests — run this before committing |
 
@@ -40,7 +40,7 @@ game — they are two games that happen to share a truck.
 | Place | The game |
 |---|---|
 | **The city** | Deliveries. Several orders live at once, three crates a load, rivals racing you for them, roadworks that move. The clock is only refilled by delivering. |
-| **Kaidō pass** | A timed run, start line to summit and over. One road, nine checkpoints, no rivals — and the plan region stops being a map and becomes a co-driver. |
+| **Kaidō pass** | A timed run, start line to summit and over. Five kilometres of road, nineteen corners, **six hairpins**, eight checkpoints and no rivals — and the plan region stops being a map and becomes a co-driver. |
 
 **Keyboard** — **WASD** or the arrows, **Space** brake, **Shift** drift,
 **Esc** pause, **M** mute, **T** the bend tuner.
@@ -214,6 +214,14 @@ There is no crash barrier. The valley wall is steep enough that gravity beats
 what the tyres can put down, so going off costs you the corner rather than the
 run.
 
+The road is built from straights and constant-radius arcs rather than from a
+curve, and that is not an implementation detail — it is what makes hairpins
+possible at all. A road written as `x = f(z)` has an apex radius of `1/f″`, so
+swinging it through ±71° at a 30-metre apex leaves the ends at a 717-metre
+radius: tight for an instant, nearly straight either side. A hairpin needs a
+*sustained* tight radius through 160°, which that form cannot express at any
+amplitude.
+
 ## Testing it on an iPad with a controller
 
 **Get it onto a URL — no computer required.** `.github/workflows/deploy.yml`
@@ -339,7 +347,9 @@ Kept short here; the full list with the stories is in `context.md`.
 - **CPU terrain and shader terrain must stay identical, in both branches.** They
   live next to each other on purpose: the city's in `core/terrain.ts`, the
   pass's in `core/pass-shape.ts` beside its GLSL twin. Let them drift and the
-  truck drives on a ghost surface, which presents as a physics bug.
+  truck drives on a ghost surface, which presents as a physics bug. Don't
+  suspect it, measure it: `__parity()` in a dev build renders the shader's
+  terrain into a float target and reports the worst gap against the CPU's.
 
 ## Built with
 

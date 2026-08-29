@@ -404,11 +404,15 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__setClock = (s: number) => {
     (game.game as unknown as { clock: number }).clock = s;
   };
-  // Put the truck a given distance up the pass, for testing the far end of a
-  // five-kilometre road without driving all of it in a software renderer.
-  (window as unknown as Record<string, unknown>).__seek = (z: number) => {
+  /* Put the truck a fraction of the way along the level's road, for testing
+     the far end of a five-kilometre pass without driving all of it in a
+     software renderer. A FRACTION rather than a world coordinate: the pass
+     doubles back through its hairpins, so "seek to z = 2500" stopped meaning
+     anything the moment the road became a real track. */
+  (window as unknown as Record<string, unknown>).__seek = (t: number) => {
     const net = level.network;
-    const i = net.nearest(0, z);
+    const i = Math.max(0, Math.min(net.nodes.length - 1,
+      Math.round(t * (net.nodes.length - 1))));
     const [x, zz] = net.position(i);
     // Pointed along the road, not at whatever heading the truck happened to
     // have — dropped in sideways it looks like a rendering fault rather than
@@ -417,6 +421,32 @@ if (import.meta.env.DEV) {
     const [nx, nz] = net.position(j);
     resetCar(car, x, zz, Math.atan2(nx - x, nz - zz));
     return [x, zz];
+  };
+
+  // Set a bend parameter live, e.g. __setBend('z0', 900) to unfold the world
+  // and look at the raw geometry.
+  (window as unknown as Record<string, unknown>).__setBend = (k: string, v: number) => {
+    (P as unknown as Record<string, number>)[k] = v;
+    return { ...P };
+  };
+
+  /* Terrain parity: does the shader agree with the physics about where the
+     ground is? Sweeps a patch around the truck and reports the worst gap. */
+  (window as unknown as Record<string, unknown>).__parity = async (span = 300, step = 12) => {
+    const { probeTerrain } = await import('./render/terrain-probe');
+    const pts: Array<[number, number]> = [];
+    for (let dx = -span; dx <= span; dx += step)
+      for (let dz = -span; dz <= span; dz += step) pts.push([car.x + dx, car.z + dz]);
+    const rows = probeTerrain(world.renderer, pts);
+    let worst = rows[0];
+    for (const r of rows) if (Math.abs(r.diff) > Math.abs(worst.diff)) worst = r;
+    const bad = rows.filter(r => Math.abs(r.diff) > 0.05);
+    return {
+      points: rows.length,
+      worst: { x: Math.round(worst.x), z: Math.round(worst.z), cpu: worst.cpu, gpu: worst.gpu, diff: worst.diff },
+      over5cm: bad.length,
+      sample: bad.slice(0, 5).map(r => [Math.round(r.x), Math.round(r.z), +r.cpu.toFixed(2), +r.gpu.toFixed(2)])
+    };
   };
 
   // Measures the real RMS on the master bus, so "is there actually sound"

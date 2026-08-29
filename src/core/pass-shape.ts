@@ -4,53 +4,195 @@
  * One road up a valley and back down the other side. Where the city is a
  * lattice you can cut across, this is a single line you cannot leave — which
  * is the whole reason it is worth building as a second place. It asks the
- * projection a different question.
+ * projection a different question. See game/pass-run.ts.
  *
- * In the city the plan region is a MAP: it shows you a choice of routes and a
- * cluster of drops, and the game is deciding an order to serve them in. On a
- * pass there is no route to choose, so the map would be a stripe of nothing.
- * What lives up there instead is what the road is about to do — the rally
- * co-driver's job. See `game/pace-notes.ts`.
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A TRACK AND NOT A CURVE (30 Aug)
  *
- * THE SHAPE IS ANALYTIC, and that is not an implementation detail. The road
- * centreline is a sum of three sines in z, so:
+ * The first version was `x = S(z)`, a sum of three sines. It gave a road that
+ * wound convincingly, it was exact in closed form, and it could not make a
+ * hairpin. That is not a tuning failure, it is arithmetic:
  *
- *   - the terrain function can be written in closed form and matched EXACTLY by
- *     the vertex shader, which is the one hard requirement in this codebase
- *     (see the note in core/terrain.ts about ghost surfaces);
- *   - the road network is samples of that same curve, so junction positions
- *     and the valley floor can never disagree;
- *   - the pace notes are derived by differentiating it rather than by measuring
- *     geometry that might have drifted.
+ *   curvature of x = f(z) is  |S″| / (1 + S′²)^1.5
  *
- * WHY THE SWAY IS BOUNDED. `u` below is horizontal offset from the centreline,
- * corrected to a perpendicular distance by dividing through by √(1+S′²). That
- * is a first-order approximation and it degrades as the road turns away from
- * the z axis, so the amplitudes are chosen to keep |S′| under about 1.5 —
- * corners up to roughly 55° off the axis. Real hairpins would need the corridor
- * measured against the polyline instead, which the shader cannot do cheaply.
- * The tightest corner here still comes out at about a 60m radius, which at
- * cruising speed is a proper committed corner rather than a kink.
+ * At the apex of a turn S′ = 0, so the apex radius is just 1/S″. To swing the
+ * road through ±71° (S′ = ±3) at a 30m apex radius you need S″ ≈ 0.033 held
+ * over Δz = 6/0.033 = 180 metres — and at the ENDS of that swing, where
+ * |S′| = 3, the same S″ gives a radius of 717m. So the tight bit is an instant
+ * and the approach and exit are nearly straight. A hairpin is the opposite: a
+ * SUSTAINED tight radius through 160°. The function form cannot express one at
+ * any amplitude, so no amount of choosing sines was going to help.
+ *
+ * So the road is now what a road actually is: a sequence of straights and
+ * constant-radius arcs. Distance from a point to it is the min over the pieces,
+ * which is a handful of dot products each and exact — no small-angle
+ * approximation, no bound on how far the road may turn, and hairpins for free.
+ *
+ * THE SHAPE IS STILL THE SINGLE SOURCE OF TRUTH. The terrain, the road network,
+ * the pace notes and the off-road test are all derived from these pieces, so
+ * they cannot disagree about where the road is. The pace notes get simpler
+ * rather than harder: every arc IS a corner, with its radius already known,
+ * instead of something to be found by differentiating a curve.
  */
 
-/** How long the pass is, start line to finish, in metres along +Z. */
-export const PASS_LENGTH = 5200;
+/** 0 = straight, +1 = arc turning right, −1 = arc turning left. */
+export type PieceKind = 0 | 1 | -1;
+
+/** One piece of road, placed in the world. */
+export interface Prim {
+  kind: PieceKind;
+  /** Straight: the start point. Arc: the centre. */
+  ax: number;
+  az: number;
+  /** Straight: the end point. Arc: unused. */
+  bx: number;
+  bz: number;
+  /** Arc radius. */
+  r: number;
+  /** Arc: the CCW-covered angular interval, for the containment test. */
+  lo: number;
+  span: number;
+  /** Angle at the piece's start, and the signed sweep from it. */
+  aStart: number;
+  sweep: number;
+  /** Distance along the whole road at this piece's start, and its own length. */
+  s0: number;
+  len: number;
+  /** Bounding circle, so the min search can skip a piece it cannot win. */
+  mx: number;
+  mz: number;
+  rad: number;
+}
 
 /**
- * The three sway terms. Amplitude in metres, wavelength in metres.
+ * The recipe: alternating runs and turns, in order. `a` is the turn in DEGREES,
+ * positive right. Radii are in metres.
  *
- * Deliberately not harmonics of one another: a road built from a fundamental
- * and its octaves has a rhythm you learn in one run, and a pass should still
- * be catching you out on the fifth.
+ * Read it as a drive. It opens fast, tightens through the middle third where
+ * the switchbacks are, and lets go again over the top. Four hairpins, at 24 to
+ * 30 metres of radius — tight enough that the truck cannot take one without
+ * either braking hard or drifting it, which is the point of having them.
+ *
+ * The one constraint worth knowing: consecutive hairpins alternate hand, so the
+ * road works its way ACROSS the mountain rather than tying itself in a knot.
  */
-export const SWAY: ReadonlyArray<{ a: number; lambda: number; phase: number }> = [
-  { a: 180, lambda: 1500, phase: 0.0 },
-  { a: 34,  lambda: 460,  phase: 1.3 },
-  { a: 7,   lambda: 180,  phase: 0.6 }
+type Step = { s: number } | { r: number; a: number };
+
+const RECIPE: Step[] = [
+  { s: 260 },
+  { r: 130, a: 52 }, { s: 160 },
+  { r: 95, a: -74 }, { s: 100 },
+  { r: 46, a: 88 }, { s: 210 },
+  { r: 160, a: -38 }, { s: 120 },
+
+  /* SWITCHBACK ONE. Hairpins come in pairs, and both halves turn through very
+     nearly 180° with a short run between them — which is not decoration.
+     The first attempt used 158° and 135m, and the two legs converged at 22° for
+     135 metres, which closed exactly the 51m the hairpin had opened: the road
+     crossed itself, and where it did, the terrain has two roads at two heights
+     fighting over the same ground. There is a test for it now. */
+  { r: 26, a: 172 }, { s: 80 },
+  { r: 27, a: -168 }, { s: 250 },
+
+  { r: 72, a: 62 }, { s: 110 },
+  { r: 39, a: -96 }, { s: 170 },
+  { r: 185, a: 34 },
+  { s: 330 },                        // the long one, over the shoulder
+
+  { r: 30, a: -170 }, { s: 85 },     // switchback two
+  { r: 28, a: 166 }, { s: 240 },
+
+  { r: 56, a: 82 }, { s: 150 },
+  { r: 88, a: -66 }, { s: 185 },
+
+  { r: 24, a: 174 }, { s: 90 },      // switchback three — the tightest pair
+  { r: 26, a: -170 }, { s: 230 },
+
+  { r: 50, a: 92 }, { s: 160 },
+  { r: 115, a: -46 }, { s: 140 },
+  { r: 35, a: 104 }, { s: 265 },
+  { r: 145, a: -48 }, { s: 200 }
 ];
 
-/** Summit height above the start, in metres. Reached halfway, back to 0 at the end. */
-export const PASS_CLIMB = 90;
+
+const D2R = Math.PI / 180;
+const TAU = Math.PI * 2;
+
+/** Fold an angle into [0, 2π). */
+const norm = (a: number): number => ((a % TAU) + TAU) % TAU;
+
+function buildTrack(): Prim[] {
+  const out: Prim[] = [];
+  let x = 0, z = 0, head = 0, s = 0;
+
+  for (const step of RECIPE) {
+    if ('s' in step) {
+      const bx = x + Math.sin(head) * step.s;
+      const bz = z + Math.cos(head) * step.s;
+      out.push(prim({
+        kind: 0, ax: x, az: z, bx, bz, r: 0,
+        aStart: 0, sweep: 0, s0: s, len: step.s
+      }));
+      x = bx; z = bz; s += step.s;
+    } else {
+      const turn = step.a * D2R;
+      const sign = Math.sign(turn) as 1 | -1;
+      /* The centre is one radius to the side the road is turning toward.
+         Heading is measured from +Z toward +X, so "right" is heading + 90°. */
+      const toC = head + sign * Math.PI / 2;
+      const cx = x + Math.sin(toC) * step.r;
+      const cz = z + Math.cos(toC) * step.r;
+      // Angle of the START point as seen from the centre — the opposite way.
+      const aStart = toC + Math.PI;
+      /* Work the tangent out rather than guessing the sign. Position round the
+         circle is C + R(sin a, cos a), so velocity is proportional to
+         (cos a, −sin a) for increasing a — and at a = aStart = head − π/2 that
+         is exactly (sin head, cos head), the direction of travel. So the swept
+         angle runs the SAME way as the heading change.
+
+         It was written as −turn first, and the failure is worth knowing because
+         it is nearly invisible: every piece is individually correct, the road
+         is still one connected curve, and the only symptom is that each arc
+         leaves its entry point travelling backwards. The self-consistency
+         checks all passed. What caught it was plotting the road and noticing
+         it doubling back over a 185m-radius, 34° bend. */
+      const sweep = turn;
+      const len = step.r * Math.abs(turn);
+      out.push(prim({
+        kind: sign, ax: cx, az: cz, bx: 0, bz: 0, r: step.r,
+        aStart, sweep, s0: s, len
+      }));
+      const aEnd = aStart + sweep;
+      x = cx + Math.sin(aEnd) * step.r;
+      z = cz + Math.cos(aEnd) * step.r;
+      head += turn;
+      s += len;
+    }
+  }
+  return out;
+}
+
+/** Fill in the derived fields: the containment interval and the bounding circle. */
+function prim(p: Omit<Prim, 'lo' | 'span' | 'mx' | 'mz' | 'rad'>): Prim {
+  if (p.kind === 0) {
+    return {
+      ...p, lo: 0, span: 0,
+      mx: (p.ax + p.bx) / 2, mz: (p.az + p.bz) / 2,
+      rad: Math.hypot(p.bx - p.ax, p.bz - p.az) / 2
+    };
+  }
+  const lo = norm(p.sweep > 0 ? p.aStart : p.aStart + p.sweep);
+  const span = Math.abs(p.sweep);
+  /* Bounding circle of an arc: the centre plus the radius is generous but
+     always correct, and correctness is what the min search's early-out needs —
+     a bound that is ever too small silently loses the nearest piece. */
+  return { ...p, lo, span, mx: p.ax, mz: p.az, rad: p.r };
+}
+
+export const TRACK: Prim[] = buildTrack();
+
+/** Total length of road, start line to finish, in metres. */
+export const PASS_LENGTH: number = TRACK.reduce((a, p) => a + p.len, 0);
 
 /** Half-width of the flat carriageway plus its verge. */
 export const PASS_ROAD_HALF = 7.5;
@@ -62,54 +204,109 @@ export const PASS_WALL_H = 60;
 /** Slope of the mountainside beyond the wall, on up into the peaks. */
 export const PASS_WALL_TAIL = 0.55;
 
-/** Small undulation along the road itself, so the climb is not a ramp. */
+/** Summit height above the start, in metres. Reached halfway. */
+export const PASS_CLIMB = 105;
+/** Small undulation along the road, so the climb is not a ramp. */
 export const PASS_RIPPLE_A = 2.4;
 export const PASS_RIPPLE_K = 0.021;
 
-/** Lateral position of the road's centreline at distance z along the pass. */
-export function spineX(z: number): number {
-  let x = 0;
-  for (const t of SWAY) x += t.a * Math.sin((2 * Math.PI / t.lambda) * z + t.phase);
-  return x;
-}
-
-/** dx/dz of the centreline — the road's angle away from the pass axis. */
-export function spineSlope(z: number): number {
-  let d = 0;
-  for (const t of SWAY) {
-    const k = 2 * Math.PI / t.lambda;
-    d += t.a * k * Math.cos(k * z + t.phase);
-  }
-  return d;
-}
-
-/** d²x/dz² — curvature, near enough, and the raw material of a pace note. */
-export function spineCurve(z: number): number {
-  let d = 0;
-  for (const t of SWAY) {
-    const k = 2 * Math.PI / t.lambda;
-    d -= t.a * k * k * Math.sin(k * z + t.phase);
-  }
-  return d;
-}
-
 /**
- * Perpendicular distance from the road's centreline, near enough.
+ * Nearest point on the road: how far away it is, and how far along the road
+ * that point is.
  *
- * The exact answer needs the closest point on the curve, which is a root-find.
- * Dividing the horizontal offset by √(1+S′²) is the first-order version and
- * costs two multiplies — which matters, because the vertex shader calls this
- * for every vertex in the valley.
+ * A plain min over the pieces, with a cheap lower bound skipping any piece that
+ * cannot beat the best so far. Exact, unbounded in how far the road may turn,
+ * and — unlike the closed-form version this replaced — it does not care that
+ * two legs of a hairpin pass within fifty metres of each other.
  */
-export function offCentre(x: number, z: number): number {
-  const s = spineSlope(z);
-  return Math.abs(x - spineX(z)) / Math.sqrt(1 + s * s);
+export function trackNearest(x: number, z: number): { d: number; s: number } {
+  let best = Infinity;
+  let bestS = 0;
+
+  for (const p of TRACK) {
+    // Lower bound on the distance to anything in this piece.
+    const bound = Math.hypot(x - p.mx, z - p.mz) - p.rad;
+    if (bound >= best) continue;
+
+    let d: number, t: number;
+    if (p.kind === 0) {
+      const dx = p.bx - p.ax, dz = p.bz - p.az;
+      const u = Math.min(1, Math.max(0,
+        ((x - p.ax) * dx + (z - p.az) * dz) / (dx * dx + dz * dz)));
+      d = Math.hypot(x - (p.ax + dx * u), z - (p.az + dz * u));
+      t = u * p.len;
+    } else {
+      const vx = x - p.ax, vz = z - p.az;
+      const rr = Math.hypot(vx, vz);
+      // Is the point inside the arc's angular wedge?
+      const da = norm(Math.atan2(vx, vz) - p.lo);
+      if (da <= p.span) {
+        d = Math.abs(rr - p.r);
+        const along = p.sweep > 0 ? da : p.span - da;
+        t = along * p.r;
+      } else {
+        // Outside it: the nearest point is whichever end is closer.
+        const e0 = p.aStart, e1 = p.aStart + p.sweep;
+        const d0 = Math.hypot(x - (p.ax + Math.sin(e0) * p.r), z - (p.az + Math.cos(e0) * p.r));
+        const d1 = Math.hypot(x - (p.ax + Math.sin(e1) * p.r), z - (p.az + Math.cos(e1) * p.r));
+        d = Math.min(d0, d1);
+        t = d0 <= d1 ? 0 : p.len;
+      }
+    }
+    if (d < best) { best = d; bestS = p.s0 + t; }
+  }
+  return { d: best, s: bestS };
+}
+
+/** Perpendicular distance from the road's centreline. */
+export const offCentre = (x: number, z: number): number => trackNearest(x, z).d;
+
+/** Where the road is, and which way it points, at distance `s` along it. */
+export function trackPoint(s: number): [number, number] {
+  const p = pieceAt(s);
+  const t = Math.min(p.len, Math.max(0, s - p.s0));
+  if (p.kind === 0) {
+    const u = p.len > 0 ? t / p.len : 0;
+    return [p.ax + (p.bx - p.ax) * u, p.az + (p.bz - p.az) * u];
+  }
+  const a = p.aStart + p.sweep * (t / p.len);
+  return [p.ax + Math.sin(a) * p.r, p.az + Math.cos(a) * p.r];
+}
+
+export function trackHeading(s: number): number {
+  const p = pieceAt(s);
+  if (p.kind === 0) return Math.atan2(p.bx - p.ax, p.bz - p.az);
+  const t = Math.min(p.len, Math.max(0, s - p.s0));
+  const a = p.aStart + p.sweep * (t / p.len);
+  // Tangent to the circle, pointing the way the road runs.
+  return a + (p.sweep > 0 ? Math.PI / 2 : -Math.PI / 2);
+}
+
+/** Signed curvature at `s`: 0 on a straight, ±1/r on an arc, + for a right. */
+export function trackCurvature(s: number): number {
+  const p = pieceAt(s);
+  return p.kind === 0 ? 0 : p.kind / p.r;
+}
+
+/** Radius of the road at `s`. Infinity on a straight. */
+export const trackRadius = (s: number): number => {
+  const p = pieceAt(s);
+  return p.kind === 0 ? Infinity : p.r;
+};
+
+export function pieceAt(s: number): Prim {
+  const t = Math.min(PASS_LENGTH, Math.max(0, s));
+  // Linear scan of thirty-odd pieces. Called a few thousand times a frame at
+  // most, from the scenery builder and the notes; a binary search would be
+  // measuring the wrong thing.
+  for (let i = TRACK.length - 1; i >= 0; i--) if (t >= TRACK[i].s0) return TRACK[i];
+  return TRACK[0];
 }
 
 /** The valley floor's height along the road: a climb to the summit and back. */
-export function passFloor(z: number): number {
-  const t = Math.min(1, Math.max(0, z / PASS_LENGTH));
-  return PASS_CLIMB * Math.sin(Math.PI * t) + PASS_RIPPLE_A * Math.sin(PASS_RIPPLE_K * z);
+export function passFloor(s: number): number {
+  const t = Math.min(1, Math.max(0, s / PASS_LENGTH));
+  return PASS_CLIMB * Math.sin(Math.PI * t) + PASS_RIPPLE_A * Math.sin(PASS_RIPPLE_K * s);
 }
 
 /**
@@ -128,12 +325,18 @@ export function passWall(d: number): number {
 }
 
 export function passTerrainAt(x: number, z: number): number {
-  return passFloor(z) + passWall(offCentre(x, z));
+  const n = trackNearest(x, z);
+  return passFloor(n.s) + passWall(n.d);
 }
 
 /** Off the carriageway: draggy and slippery, and on this road also uphill. */
-export function passOffroad(x: number, z: number): boolean {
-  return offCentre(x, z) > PASS_ROAD_HALF;
+export const passOffroad = (x: number, z: number): boolean =>
+  trackNearest(x, z).d > PASS_ROAD_HALF;
+
+/** Where a run begins: on the line, pointing up the valley. */
+export function passSpawn(): { x: number; z: number; heading: number } {
+  const [x, z] = trackPoint(24);
+  return { x, z, heading: trackHeading(24) };
 }
 
 /**
@@ -142,40 +345,97 @@ export function passOffroad(x: number, z: number): boolean {
  * one height and the suspension says another, and it presents as a physics
  * problem rather than as a shader one.
  *
- * `uPassA`/`uPassB` carry the sway amplitudes and wavenumbers; `uPassC` carries
- * the phases, the climb and the length; `uPassD` the wall shape. Packed into
- * vectors rather than named individually so adding a term is a constant change
- * rather than three more uniforms.
+ * The track is uploaded as three vec4 per piece:
+ *   p0 = (kind, ax, az, r)      kind 0 straight, ±1 arc
+ *   p1 = (bx, bz, lo, span)
+ *   p2 = (aStart, sweep, s0, len)
+ * and the bounding circle is (ax, az, r) for an arc and the midpoint of the
+ * segment for a straight, so p3 carries it rather than recomputing.
+ *   p3 = (mx, mz, rad, 0)
+ *
+ * The loop is bounded by a compile-time constant, as GLSL ES 1.0 requires, and
+ * pieces past the real count are marked unused by a negative bounding radius.
  */
+export const PASS_PRIMS = 40;
+export const PASS_STRIDE = 4;
+
 export const PASS_GLSL = /* glsl */ `
-  float passSpine(float z){
-    return uPassA.x*sin(uPassB.x*z + uPassC.x)
-         + uPassA.y*sin(uPassB.y*z + uPassC.y)
-         + uPassA.z*sin(uPassB.z*z + uPassC.z);
+  #define PASS_PRIMS ${PASS_PRIMS}
+  #define PASS_TAU 6.28318530718
+
+  float passNorm(float a){ return a - PASS_TAU * floor(a / PASS_TAU); }
+
+  // Returns (distance to the road, distance along the road).
+  vec2 trackNearest(vec2 p){
+    float best = 1e9;
+    float bestS = 0.0;
+    for(int i = 0; i < PASS_PRIMS; i++){
+      vec4 b = uTrack[i * 4 + 3];
+      if(b.z < 0.0) continue;                       // unused slot
+      float bound = length(p - b.xy) - b.z;
+      if(bound >= best) continue;
+
+      vec4 p0 = uTrack[i * 4];
+      vec4 p1 = uTrack[i * 4 + 1];
+      vec4 p2 = uTrack[i * 4 + 2];
+      float d, t;
+
+      if(p0.x == 0.0){
+        vec2 a = p0.yz, e = p1.xy - a;
+        float u = clamp(dot(p - a, e) / dot(e, e), 0.0, 1.0);
+        d = length(p - (a + e * u));
+        t = u * p2.w;
+      } else {
+        vec2 c = p0.yz;
+        float r = p0.w;
+        vec2 v = p - c;
+        float rr = length(v);
+        float da = passNorm(atan(v.x, v.y) - p1.z);
+        if(da <= p1.w){
+          d = abs(rr - r);
+          float along = p2.y > 0.0 ? da : p1.w - da;
+          t = along * r;
+        } else {
+          float e0 = p2.x, e1 = p2.x + p2.y;
+          float d0 = length(p - (c + vec2(sin(e0), cos(e0)) * r));
+          float d1 = length(p - (c + vec2(sin(e1), cos(e1)) * r));
+          d = min(d0, d1);
+          t = d0 <= d1 ? 0.0 : p2.w;
+        }
+      }
+      if(d < best){ best = d; bestS = p2.z + t; }
+    }
+    return vec2(best, bestS);
   }
-  float passSlope(float z){
-    return uPassA.x*uPassB.x*cos(uPassB.x*z + uPassC.x)
-         + uPassA.y*uPassB.y*cos(uPassB.y*z + uPassC.y)
-         + uPassA.z*uPassB.z*cos(uPassB.z*z + uPassC.z);
-  }
+
   float passTerrain(vec2 p){
-    float s = passSlope(p.y);
-    float d = abs(p.x - passSpine(p.y)) / sqrt(1.0 + s*s);
-    float t = clamp(p.y / uPassD.w, 0.0, 1.0);
-    float floorY = uPassD.x * sin(3.14159265 * t) + uPassE.z * sin(uPassE.w * p.y);
-    float w = clamp((d - uPassD.y) / uPassD.z, 0.0, 1.0);
-    float over = max(d - uPassD.y - uPassD.z, 0.0);
+    vec2 n = trackNearest(p);
+    float t = clamp(n.y / uPassD.w, 0.0, 1.0);
+    float floorY = uPassD.x * sin(3.14159265 * t) + uPassE.z * sin(uPassE.w * n.y);
+    float w = clamp((n.x - uPassD.y) / uPassD.z, 0.0, 1.0);
+    float over = max(n.x - uPassD.y - uPassD.z, 0.0);
     return floorY + uPassE.x * w * w + over * uPassE.y;
   }`;
 
 /** The uniform payload, so the shader and the CPU are fed from one place. */
 export function passUniformValues() {
-  const k = (i: number) => (2 * Math.PI) / SWAY[i].lambda;
+  const track: number[][] = [];
+  for (let i = 0; i < PASS_PRIMS; i++) {
+    const p = TRACK[i];
+    if (!p) {
+      track.push([0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, -1, 0]);
+      continue;
+    }
+    track.push(
+      [p.kind, p.ax, p.az, p.r],
+      [p.bx, p.bz, p.lo, p.span],
+      [p.aStart, p.sweep, p.s0, p.len],
+      [p.mx, p.mz, p.rad, 0]
+    );
+  }
   return {
-    A: [SWAY[0].a, SWAY[1].a, SWAY[2].a] as const,
-    B: [k(0), k(1), k(2)] as const,
-    C: [SWAY[0].phase, SWAY[1].phase, SWAY[2].phase] as const,
     D: [PASS_CLIMB, PASS_ROAD_HALF, PASS_WALL_RAMP, PASS_LENGTH] as const,
-    E: [PASS_WALL_H, PASS_WALL_TAIL, PASS_RIPPLE_A, PASS_RIPPLE_K] as const
+    E: [PASS_WALL_H, PASS_WALL_TAIL, PASS_RIPPLE_A, PASS_RIPPLE_K] as const,
+    track
   };
 }

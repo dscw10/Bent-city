@@ -216,7 +216,7 @@ Working:
 - Title, pause, results, restart, settings, best scores — no refreshing to replay
 - Full synthesised audio: layered engine, tyre and surface noise, panned rivals,
   four-stem adaptive music
-- 125 headless tests over the rules, the physics, collision and the pass
+- 129 headless tests over the rules, the physics, collision and the pass
 
 Not built yet:
 - Any handling nuance beyond what is there — the truck is good, not finished
@@ -800,6 +800,115 @@ generator regardless, and the shared part is the graph underneath.
 `Level` in `game/levels.ts` is the shape a second place slots into — network,
 wrap size, off-road test, spawn, and a `build()` that makes the scenery. Only
 the city implements it so far.
+
+## Hairpins, and why the road had to stop being a curve (30 Aug)
+
+Chris: *"I like the idea of more hairpins."*
+
+### The arithmetic said no
+
+The pass was `x = S(z)`, a sum of three sines. Adding more hairpins looked like
+a tuning job — pick bigger amplitudes, shorter wavelengths — and it is not one.
+For a road written as a function of one axis,
+
+```
+curvature = |S″| / (1 + S′²)^1.5
+```
+
+At the apex of a turn `S′ = 0`, so the apex radius is exactly `1/S″`. To swing
+the road through ±71° (`S′ = ±3`) at a 30-metre apex you need `S″ ≈ 0.033` held
+over `Δz = 6/0.033 = 180` metres — and at the ENDS of that swing, where
+`|S′| = 3`, the same `S″` gives a radius of **717 metres**. The tight bit is an
+instant and the approach and exit are nearly straight.
+
+A hairpin is the opposite: a *sustained* tight radius through 160-odd degrees.
+No choice of sines produces one, at any amplitude. The form was the limit.
+
+### So the road is a track now
+
+A sequence of straights and constant-radius arcs, walked from a start point and
+heading — which is what a road actually is. Distance from a point to it is the
+min over the pieces, each a few dot products, and:
+
+- it is **exact**, not a small-angle approximation;
+- there is **no bound on how far the road may turn**, so hairpins are free;
+- it does not care that two legs of a switchback pass fifty metres apart.
+
+The pass is now 5222 metres of road in 39 pieces: 19 corners from 24 to 185
+metres of radius, of which **six are hairpins** at 24–30 metres through 166–174°,
+arranged as three switchback pairs. At 24 metres you cannot take one without
+either braking hard or drifting it, which is the point of having them.
+
+### Three things got SIMPLER, which is how you know it was the right shape
+
+- **Pace notes.** Finding a corner used to mean sampling curvature, thresholding
+  it, grouping runs of the same sign, merging across gaps and hunting the apex
+  for a radius. Every arc IS a corner now, with its radius written on it. The
+  whole search deleted.
+- **Arc length.** The old road was parameterised by a straight axis that ran up
+  to 45% short of the real driving distance, so there was a tabulated integral
+  to convert. Distance along the road is now the parameter. `arcAt` deleted.
+- **Checkpoints.** They were laid out by arc distance, which meant binary
+  searching that table forty times per gate to get back to an axis position.
+  Now they are just numbers.
+
+What got harder is the shader, which has to loop over the pieces. Four vec4 per
+piece, 40 slots, and a cheap bounding-circle test that skips any piece that
+cannot beat the best distance so far — so the loop is exact and still only
+touches two or three pieces for most vertices.
+
+### Four bugs, and how each was actually caught
+
+**The arcs travelled backwards.** `sweep` was written as `−turn`. Every piece
+was individually correct, the road was one connected curve, and the
+self-consistency checks — is the nearest point to a point on the road that same
+point, does `s` round-trip — all passed. The only symptom was that each arc left
+its entry point going the wrong way. What caught it was plotting the road and
+noticing it double back over a 185-metre-radius, 34° bend. There is now a test
+that walks every joint and asserts continuity of position AND heading; the
+second half is the one that mattered.
+
+**The first recipe crossed itself.** A hairpin of 158° followed by 135 metres of
+straight converges at 22°, which closes exactly the 51 metres the hairpin had
+opened. Two legs of the road 0.6 metres apart is not a near miss — the terrain
+would have two roads at two heights fighting over the same ground. Hairpins now
+turn through very nearly 180° with a short run between them, and a test asserts
+the road never comes within 30 metres of itself.
+
+**The ground had two layers and they disagreed about what they were.** A ribbon
+of ground at fixed offsets from the road folds inside out on the inside of a
+corner tighter than the ribbon is wide, so a coarse world grid covers everything
+and a fine ribbon adds detail near the road. Two problems followed:
+
+  - the coarse grid's flat chords stood proud of the true surface and won the
+    depth test, hiding the road completely — the truck sat on a featureless grey
+    plain with the graded ribbon floating at the horizon. It reads as a missing
+    mesh, not as two meshes in the wrong order.
+  - worse, **two ribbons overlapped**. Where two legs of the road run 120 metres
+    apart, each one's ribbon covers the ground between them — and they disagree
+    about the colour, one calling it "120 metres out, bare rock" and the other
+    "seven metres out, tarmac". The ribbon now stops at the medial axis: walk
+    outward and quit where the nearest bit of road stops being this one.
+
+**`uBuildH` again, for the third time.** The drop on the coarse grid and the
+skirt hanging off the ribbon are both real depths, so both have to be
+pre-divided — otherwise a 3-metre drop renders as 0.9 and the grid pops back
+through. Viaducts, then traffic, then this.
+
+### The instrument that should have existed from the start
+
+"`terrainAt` here and `terrainAt` in the vertex shader must stay identical" has
+been written in three files since the beginning, and until now the only way to
+check it was to drive around waiting for the truck to sink. That is a bad
+instrument: a divergence presents as a physics bug, or as scenery at the wrong
+height, or as nothing at all until you reach the one corner where it bites.
+
+`render/terrain-probe.ts` renders the SHADER's terrain into a float target and
+reads it back, so `__parity()` sweeps a patch around the truck and reports the
+worst gap. Across 1681 points on the pass and in the city it comes back at 2.6
+centimetres, which is float precision. Half an hour of this rewrite was spent
+suspecting a ghost surface that was never there — the probe answered it in one
+call, and it is now the first thing to reach for.
 
 ## Drifting, rebuilt on the Mario Kart model (30 Aug)
 
@@ -1591,7 +1700,7 @@ caching, the phone performance pass and anything Steam-shaped are not.*
 ## Files
 
 - `src/` — the game. See the module map under "Current state" above.
-- `tests/` — 125 headless tests over the rules, the physics, collision and the pass.
+- `tests/` — 129 headless tests over the rules, the physics, collision and the pass.
 - `bent-city.html` — the original single-file prototype, kept as the historical
   record of where the bend came from. **It is no longer the game** and does not
   receive changes; open it to see what v0.7 looked like, not to play.

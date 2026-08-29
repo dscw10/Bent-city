@@ -34,7 +34,7 @@
  * because keeping them in the same file is the only thing that has ever made
  * anyone remember to change both.
  */
-import { PASS_GLSL } from '../core/pass-shape';
+import { PASS_GLSL, PASS_PRIMS, PASS_STRIDE } from '../core/pass-shape';
 
 export const TERRAIN_GLSL = /* glsl */ `
   ${PASS_GLSL}
@@ -148,8 +148,8 @@ export const BENT_VERT = /* glsl */ `
   uniform float uLocal;   // 1.0 if this mesh is authored in player-local space
   uniform float uZ0, uR, uKmin, uFlat, uEase, uFallA, uBuildH, uPhiMax;
   uniform float uTerrMode, uGroundY;
-  uniform vec3 uPassA, uPassB, uPassC;   // sway amplitudes, wavenumbers, phases
   uniform vec4 uPassD, uPassE;           // climb, corridor and wall shape
+  uniform vec4 uTrack[${PASS_PRIMS * PASS_STRIDE}];   // the road, as straights and arcs
   uniform float uDelta, uRampA, uRampB, uFogStart, uFogEnd;
   uniform vec2 uBendEnd;  // where the fold ends, integrated on the CPU
   uniform vec3 uTerr;     // hill amplitudes

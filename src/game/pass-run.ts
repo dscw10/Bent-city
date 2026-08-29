@@ -17,11 +17,9 @@ import {
 } from '../render/markers';
 import type { Point } from '../world/network';
 import {
-  PASS_LENGTH, PASS_ROAD_HALF, spineX, spineSlope, offCentre
+  PASS_LENGTH, PASS_ROAD_HALF, trackPoint, trackHeading, trackNearest, trackRadius
 } from '../core/pass-shape';
-import {
-  findCorners, arcAt, noteText, PASS_DISTANCE, gradeFor, radiusAt
-} from './pace-notes';
+import { findCorners, noteText, cornerPoint, PASS_DISTANCE } from './pace-notes';
 import type { Corner } from './pace-notes';
 
 /**
@@ -46,14 +44,14 @@ import type { Corner } from './pace-notes';
  * a board on a post out on the verge (which is what you see coming).
  */
 
-/** Metres of road between checkpoints. Eight of them over the pass. */
-const CHECKPOINT_SPACING = 640;
-/** How far past a gate's centreline still counts as through it. */
+/** How far off the centreline still counts as through a gate. */
 const GATE_HALF = 16;
 /** How far ahead the notes are drawn. Beyond this the fog has eaten them. */
 const NOTE_RANGE = 950;
 /** How far before a corner its roadside board is planted. */
 const BOARD_LEAD = 70;
+/** Metres of ROAD between ribbon samples. */
+const RIBBON_STEP = 10;
 /**
  * A board closer than this is not a warning, it is an obstruction: it arrives
  * beside the camera at three metres tall and fills a quarter of the frame.
@@ -63,33 +61,34 @@ const BOARD_MIN = 42;
 const RIBBON_NEAR = 60;
 const RIBBON_FADE = 70;
 
-interface Checkpoint { z: number; arc: number; }
+interface Checkpoint { s: number }
 
 /** The road never changes, so its corners are found once. */
 const CORNERS: Corner[] = findCorners();
 
 /**
- * Checkpoints are laid out by ARC distance, not by z — a run of 55° corners
- * packs a lot more driving into the same slice of valley, and gates spaced by z
- * would arrive in a rush there and never through the straights.
+ * Checkpoints, laid out by distance along the road.
  *
- * Each one is then nudged off any corner it lands in. A gate at an apex is a
- * gate you clip, and losing eight seconds to scenery you could not have seen
- * behind a board is not the kind of difficulty this is after.
+ * Each one is then nudged off any corner it lands in. A gate on the apex of a
+ * hairpin is a gate you clip, and losing eight seconds to scenery you could not
+ * have seen behind a board is not the kind of difficulty this is after.
+ *
+ * This got simpler with the track rewrite too: the parameter IS distance along
+ * the road now, so there is nothing to invert. The old version binary-searched
+ * an arc-length table forty times per gate, because a run of 55° corners packs
+ * far more driving into the same slice of valley than a straight does and gates
+ * spaced by the axis would have arrived in a rush there.
  */
+/** Metres of road between checkpoints. Eight of them over the pass. */
+const CHECKPOINT_SPACING = 620;
+
 const CHECKPOINTS: Checkpoint[] = (() => {
   const out: Checkpoint[] = [];
-  for (let arc = CHECKPOINT_SPACING; arc < PASS_DISTANCE - 200; arc += CHECKPOINT_SPACING) {
-    // Invert arcAt by search: it is monotonic, and this runs eight times ever.
-    let lo = 0, hi = PASS_LENGTH;
-    for (let i = 0; i < 40; i++) {
-      const mid = (lo + hi) / 2;
-      if (arcAt(mid) < arc) lo = mid; else hi = mid;
-    }
-    let z = (lo + hi) / 2;
+  for (let s = CHECKPOINT_SPACING; s < PASS_LENGTH - 200; s += CHECKPOINT_SPACING) {
+    let at = s;
     // Slide forward until the road is straight enough to hang a gate on.
-    for (let tries = 0; tries < 24 && radiusAt(z) < 240; tries++) z += 12;
-    out.push({ z, arc: arcAt(z) });
+    for (let tries = 0; tries < 30 && trackRadius(at) < 200; tries++) at += 12;
+    out.push({ s: at });
   }
   return out;
 })();
@@ -108,6 +107,8 @@ export class PassRules implements Rules {
   private cleanNotes = 0;
   /** Furthest point reached, in metres of road. Never goes backwards. */
   private covered = 0;
+  /** Where the truck is along the road right now. */
+  private at = 0;
   /**
    * The best time before this run started. Snapshotted at the line: `commit()`
    * runs before the results screen is drawn, so reading it afterwards would
@@ -135,7 +136,8 @@ export class PassRules implements Rules {
     this.offTime = 0;
     this.wasOff = false;
     this.cleanNotes = 0;
-    this.covered = arcAt(clamp(car.z, 0, PASS_LENGTH));
+    this.at = trackNearest(car.x, car.z).s;
+    this.covered = this.at;
     this.previous = save.bestTime[mode.id];
   }
 
@@ -148,10 +150,16 @@ export class PassRules implements Rules {
     if (this.finished) return out;
 
     this.elapsed += dt;
-    this.covered = Math.max(this.covered, arcAt(clamp(car.z, 0, PASS_LENGTH)));
+    /* One solve gives both halves of "where am I": how far along the road, and
+       how far off it. Progress is measured along the ROAD now rather than along
+       a straight axis — it has to be, because a hairpin doubles back and world
+       z stopped being monotonic the moment the road became a real track. */
+    const here = trackNearest(car.x, car.z);
+    this.at = here.s;
+    this.covered = Math.max(this.covered, here.s);
 
     // --- off the road, which on a mountain costs you rather than helping ---
-    const off = offCentre(car.x, car.z) > PASS_ROAD_HALF + 1.5;
+    const off = here.d > PASS_ROAD_HALF + 1.5;
     if (off) this.offTime += dt;
     if (off && !this.wasOff && Math.abs(car.v) > 12) {
       this.ctx.messages.push({ text: 'Off the road', bad: true });
@@ -160,8 +168,8 @@ export class PassRules implements Rules {
     this.wasOff = off;
 
     // --- checkpoints ---
-    while (this.next < CHECKPOINTS.length && car.z >= CHECKPOINTS[this.next].z) {
-      const through = Math.abs(car.x - spineX(CHECKPOINTS[this.next].z)) < GATE_HALF * 2;
+    while (this.next < CHECKPOINTS.length && here.s >= CHECKPOINTS[this.next].s) {
+      const through = here.d < GATE_HALF;
       this.next++;
       if (through) {
         this.clock += this.mode.timeBonus;
@@ -178,7 +186,7 @@ export class PassRules implements Rules {
     }
 
     // --- the line ---
-    if (car.z >= PASS_LENGTH) {
+    if (here.s >= PASS_LENGTH - 6) {
       this.completed = true;
       this.finished = true;
       out.finished = true;
@@ -200,16 +208,17 @@ export class PassRules implements Rules {
   }
 
   focus(): { x: number; z: number } {
-    const z = this.next < CHECKPOINTS.length ? CHECKPOINTS[this.next].z : PASS_LENGTH;
-    return { x: spineX(z), z };
+    const s = this.next < CHECKPOINTS.length ? CHECKPOINTS[this.next].s : PASS_LENGTH;
+    const [x, z] = trackPoint(s);
+    return { x, z };
   }
 
   /** The corners still ahead of the truck, nearest first. */
-  private ahead(car: Car, range = NOTE_RANGE): Corner[] {
+  private ahead(range = NOTE_RANGE): Corner[] {
     const out: Corner[] = [];
     for (const c of CORNERS) {
-      if (c.endZ < car.z - 10) continue;
-      if (c.startZ > car.z + range) break;
+      if (c.exit < this.at - 8) continue;
+      if (c.entry > this.at + range) break;
       out.push(c);
     }
     return out;
@@ -226,52 +235,58 @@ export class PassRules implements Rules {
     const path: Point[] = [];
     const colours = [];
     const widths: number[] = [];
-    const from = Math.max(0, car.z - 6);
-    const to = Math.min(PASS_LENGTH, car.z + NOTE_RANGE);
-    for (let z = from; z <= to; z += 12) {
-      path.push([spineX(z), z]);
-      colours.push(gradeColour(gradeAt(z)));
-      widths.push(5.6 * clamp((z - car.z - RIBBON_NEAR) / RIBBON_FADE, 0, 1));
+    const from = Math.max(0, this.at - 6);
+    const to = Math.min(PASS_LENGTH, this.at + NOTE_RANGE);
+    /* Stepped along the ROAD, so a hairpin gets the same number of segments per
+       metre driven as a straight does. Stepping along a world axis would draw
+       the tight corners — the ones the ribbon exists for — as three points and
+       a chord. */
+    for (let s = from; s <= to; s += RIBBON_STEP) {
+      path.push(trackPoint(s));
+      colours.push(gradeColour(gradeAt(s)));
+      widths.push(5.6 * clamp((s - this.at - RIBBON_NEAR) / RIBBON_FADE, 0, 1));
     }
     drawGradedRibbon(b, path, colours, widths);
 
     // ---- one board per corner, in both regions ----
-    for (const c of this.ahead(car)) {
-      const heading = Math.atan2(spineSlope(c.startZ), 1);
-      drawCornerBoard(b, spineX(c.startZ), c.startZ, heading, c.grade);
+    for (const c of this.ahead()) {
+      const at = cornerPoint(c);
+      drawCornerBoard(b, at.x, at.z, at.heading, c.grade);
 
-      // The roadside board goes on the OUTSIDE of the corner, where you are
-      // looking as you set the car up, and where it cannot be hidden by the
-      // bank on the inside.
-      const bz = c.startZ - BOARD_LEAD;
-      if (bz > car.z + BOARD_MIN) {
-        const s = spineSlope(bz);
-        const n = Math.sqrt(1 + s * s);
-        const side = -c.dir * 11 * n;
-        drawNoteBoard(b, spineX(bz) + side, bz, c.grade, inv);
+      /* The roadside board goes on the OUTSIDE of the corner, where you are
+         looking as you set the car up, and where the bank on the inside cannot
+         hide it. */
+      const bs = c.entry - BOARD_LEAD;
+      if (bs > this.at + BOARD_MIN) {
+        const [bx, bz] = trackPoint(bs);
+        const h = trackHeading(bs);
+        // Right of the direction of travel is (cos h, −sin h).
+        const side = -c.dir * 11;
+        drawNoteBoard(b, bx + Math.cos(h) * side, bz - Math.sin(h) * side, c.grade, inv);
       }
     }
 
     // ---- gates ----
-    const gates = CHECKPOINTS.slice(this.next, this.next + 2);
-    for (const g of gates) {
-      if (g.z > car.z + NOTE_RANGE + 200) break;
-      drawGate(b, spineX(g.z), g.z, Math.atan2(spineSlope(g.z), 1), C.matcha, inv);
+    for (const g of CHECKPOINTS.slice(this.next, this.next + 2)) {
+      if (g.s > this.at + NOTE_RANGE + 200) break;
+      const [gx, gz] = trackPoint(g.s);
+      drawGate(b, gx, gz, trackHeading(g.s), C.matcha, inv);
     }
-    if (PASS_LENGTH < car.z + NOTE_RANGE + 400) {
-      drawGate(b, spineX(PASS_LENGTH), PASS_LENGTH,
-        Math.atan2(spineSlope(PASS_LENGTH), 1), C.melon, inv);
+    if (PASS_LENGTH < this.at + NOTE_RANGE + 400) {
+      const [fx, fz] = trackPoint(PASS_LENGTH);
+      drawGate(b, fx, fz, trackHeading(PASS_LENGTH), C.melon, inv);
     }
+    void car;
   }
 
   drawMovers(): void { /* nothing lives up here */ }
 
-  hud(car: Car): HudView {
-    const notes = this.ahead(car, 700).slice(0, 5);
+  hud(_car: Car): HudView {
+    const notes = this.ahead(700).slice(0, 5);
     const slots: Slot[] = notes.map((c, i) => {
-      const d = Math.max(0, arcAt(c.startZ) - arcAt(car.z));
+      const d = Math.max(0, c.entry - this.at);
       return {
-        key: `c${c.startZ}`,
+        key: `c${c.entry.toFixed(0)}`,
         tag: noteText(c),
         value: `${Math.round(d)} m`,
         order: d,
@@ -280,8 +295,8 @@ export class PassRules implements Rules {
       };
     });
 
-    const target = this.focus();
-    const left = Math.max(0, arcAt(target.z) - arcAt(car.z));
+    const left = Math.max(0, (this.next < CHECKPOINTS.length
+      ? CHECKPOINTS[this.next].s : PASS_LENGTH) - this.at);
     const gate = this.next < CHECKPOINTS.length
       ? `Checkpoint <span class="accent">${this.next + 1}/${CHECKPOINTS.length}</span>`
       : 'To the <span class="accent">line</span>';
@@ -333,23 +348,23 @@ export class PassRules implements Rules {
 /**
  * Grade of the road at a point, from a table built once.
  *
- * A linear scan of forty corners per ribbon segment would be eighty scans a
- * frame; a lookup every four metres is 1300 bytes and one index.
+ * A linear scan of nineteen corners per ribbon segment would be a hundred scans
+ * a frame; a lookup every four metres is 1300 bytes and one index.
  */
 const GRADE_STEP = 4;
 const GRADE_TABLE: Uint8Array = (() => {
   const n = Math.ceil(PASS_LENGTH / GRADE_STEP) + 1;
   const t = new Uint8Array(n).fill(6);
   for (const c of CORNERS) {
-    const a = Math.floor(c.startZ / GRADE_STEP), b = Math.ceil(c.endZ / GRADE_STEP);
+    const a = Math.floor(c.entry / GRADE_STEP), b = Math.ceil(c.exit / GRADE_STEP);
     for (let i = a; i <= b && i < n; i++) t[i] = c.grade;
   }
   return t;
 })();
 
-export function gradeAt(z: number): number {
-  const i = Math.round(z / GRADE_STEP);
-  if (i < 0 || i >= GRADE_TABLE.length) return gradeFor(Infinity);
+export function gradeAt(s: number): number {
+  const i = Math.round(s / GRADE_STEP);
+  if (i < 0 || i >= GRADE_TABLE.length) return 6;
   return GRADE_TABLE[i];
 }
 

@@ -25,11 +25,12 @@ export const uniforms = {
   /* Ground height under the truck. The fold measures building height from this
      rather than from sea level; see the note in BENT_VERT. */
   uGroundY:  { value: 0 },
-  uPassA:    { value: new THREE.Vector3(...PASS.A) },
-  uPassB:    { value: new THREE.Vector3(...PASS.B) },
-  uPassC:    { value: new THREE.Vector3(...PASS.C) },
   uPassD:    { value: new THREE.Vector4(...PASS.D) },
   uPassE:    { value: new THREE.Vector4(...PASS.E) },
+  /* The road itself, four vec4 per piece. Uploaded once — the track never
+     changes — and read only when uTerrMode says the pass is loaded, so the city
+     pays nothing for it beyond the uniform slots. */
+  uTrack:    { value: PASS.track.map(v => new THREE.Vector4(v[0], v[1], v[2], v[3])) },
   uZ0:       { value: P.z0 },
   uR:        { value: P.R },
   uKmin:     { value: P.kMin },

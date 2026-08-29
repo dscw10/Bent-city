@@ -1,4 +1,5 @@
-import { PASS_LENGTH, spineSlope, spineCurve, spineX } from '../core/pass-shape';
+import { TRACK, PASS_LENGTH, trackPoint, trackHeading } from '../core/pass-shape';
+import type { Prim } from '../core/pass-shape';
 
 /**
  * ======================= PACE NOTES =======================
@@ -22,135 +23,78 @@ import { PASS_LENGTH, spineSlope, spineCurve, spineX } from '../core/pass-shape'
  * Counter-intuitive if you have not seen it before, which is why the HUD prints
  * the direction letter first — "L2" reads as a thing rather than as a number.
  *
- * Everything here is derived by DIFFERENTIATING the centreline rather than by
- * measuring the built geometry. The road, the terrain and the notes are then
- * three views of one function and cannot disagree about where a corner is.
+ * THIS USED TO BE THE HARD PART. When the road was a sum of sines, a corner had
+ * to be FOUND: sample the curvature, threshold it, group runs of the same sign,
+ * merge across gaps, then hunt the apex for a radius. Now the road is built
+ * from arcs, so every corner is a piece of the track with its radius already
+ * written on it, and all of that goes away. That is the second time the track
+ * rewrite made something downstream simpler rather than harder.
  */
 
 export interface Corner {
-  /** Distance along the pass axis where the corner begins and ends. */
-  startZ: number;
-  endZ: number;
-  /** Where it is tightest. */
-  apexZ: number;
-  /** Tightest radius through it, in metres. */
+  /** Distance along the road where the corner begins and ends. */
+  entry: number;
+  exit: number;
+  /** The arc's radius, in metres. */
   radius: number;
   /** −1 left, +1 right. */
   dir: -1 | 1;
+  /** How far round it goes, in radians. */
+  sweep: number;
   /** Rally grade: 1 tightest … 6 fastest. */
   grade: number;
-  /** Arc distance from the start line to the corner's entry. */
-  entry: number;
-}
-
-/** Beyond this radius the road is not doing anything worth calling out. */
-const CORNER_RADIUS = 260;
-/** Two bends closer than this with the same sign are one corner. */
-const MERGE_GAP = 45;
-/** A wobble shorter than this is noise in the sway, not a corner. */
-const MIN_LENGTH = 14;
-
-/** Radius of the centreline at z. Standard curvature of x = f(z). */
-export function radiusAt(z: number): number {
-  const s = spineSlope(z);
-  const c = spineCurve(z);
-  return Math.pow(1 + s * s, 1.5) / Math.max(1e-9, Math.abs(c));
 }
 
 /**
  * Grade from radius, 1 tightest to 6 barely a bend.
  *
- * The boundaries were picked against this road's ACTUAL distribution rather
- * than from a table. Its forty corners run from a 59m radius to about 250m, so
- * generic thresholds would have graded nearly half of them a 2 — and a warning
- * that fires on half the corners is not a warning, it is a background colour.
- * These put three corners in grade 1 and four in grade 2, which keeps a red
- * note something you sit up for.
+ * Calibrated against THIS road's actual arcs rather than from a table — the
+ * boundaries mean nothing without the distribution they are cutting. The pass
+ * has nineteen corners at these radii:
  *
- * Measured quantiles, for whoever changes the sway terms next:
- *   min 59 · p20 81 · p40 101 · p60 133 · p80 187 · max 249
+ *   24 26 26 27 28 30 · 35 39 · 46 50 56 · 72 88 · 95 115 130 · 145 160 185
+ *
+ * which the cuts below split 6 / 2 / 3 / 2 / 3 / 3. The six in grade 1 are the
+ * hairpins, and they are the reason the grade exists: at 24 metres of radius
+ * the truck cannot take one without either braking hard or drifting it.
  */
 export function gradeFor(radius: number): number {
-  if (radius < 66) return 1;
-  if (radius < 85) return 2;
-  if (radius < 110) return 3;
-  if (radius < 150) return 4;
-  if (radius < 200) return 5;
+  if (radius < 32) return 1;
+  if (radius < 45) return 2;
+  if (radius < 60) return 3;
+  if (radius < 95) return 4;
+  if (radius < 140) return 5;
   return 6;
 }
 
-/**
- * Arc length along the centreline, tabulated every 4m.
- *
- * Worth the table: the road runs up to 55° away from the pass axis, so at its
- * worst a metre of z is 1.45 metres of driving. Calling a corner "in 200m" when
- * it is 280m of road away is the difference between a note you trust and one
- * you learn to ignore.
- */
-const ARC_STEP = 4;
-const ARC: Float64Array = (() => {
-  const n = Math.ceil(PASS_LENGTH / ARC_STEP) + 1;
-  const a = new Float64Array(n);
-  for (let i = 1; i < n; i++) {
-    const z = (i - 0.5) * ARC_STEP;
-    const s = spineSlope(z);
-    a[i] = a[i - 1] + Math.sqrt(1 + s * s) * ARC_STEP;
-  }
-  return a;
-})();
-
-/** Distance driven from the start line to a point z along the axis. */
-export function arcAt(z: number): number {
-  const t = Math.min(Math.max(z, 0), PASS_LENGTH) / ARC_STEP;
-  const i = Math.min(ARC.length - 2, Math.floor(t));
-  return ARC[i] + (ARC[i + 1] - ARC[i]) * (t - i);
-}
-
-/** Total length of road, as opposed to the length of the valley. */
-export const PASS_DISTANCE = arcAt(PASS_LENGTH);
-
-/**
- * Every corner on the pass, in order. Computed once — the road never changes,
- * and forty corners is not a thing worth recomputing per frame.
- */
+/** Every corner on the pass, in order. Computed once — the road never changes. */
 export function findCorners(): Corner[] {
-  const out: Corner[] = [];
-  let cur: { startZ: number; endZ: number; dir: -1 | 1; radius: number; apexZ: number } | null = null;
-
-  for (let z = 0; z <= PASS_LENGTH; z += 2) {
-    const r = radiusAt(z);
-    if (r >= CORNER_RADIUS) continue;
-    const dir: -1 | 1 = spineCurve(z) > 0 ? 1 : -1;
-
-    if (cur && cur.dir === dir && z - cur.endZ <= MERGE_GAP) {
-      cur.endZ = z;
-      if (r < cur.radius) { cur.radius = r; cur.apexZ = z; }
-    } else {
-      if (cur) push(cur, out);
-      cur = { startZ: z, endZ: z, dir, radius: r, apexZ: z };
-    }
-  }
-  if (cur) push(cur, out);
-  return out;
+  return TRACK
+    .filter((p): p is Prim => p.kind !== 0)
+    .map(p => ({
+      entry: p.s0,
+      exit: p.s0 + p.len,
+      radius: p.r,
+      dir: (p.kind === 1 ? 1 : -1) as -1 | 1,
+      sweep: Math.abs(p.sweep),
+      grade: gradeFor(p.r)
+    }));
 }
 
-function push(
-  c: { startZ: number; endZ: number; dir: -1 | 1; radius: number; apexZ: number },
-  out: Corner[]
-): void {
-  if (c.endZ - c.startZ < MIN_LENGTH) return;
-  out.push({
-    startZ: c.startZ, endZ: c.endZ, apexZ: c.apexZ,
-    radius: c.radius, dir: c.dir,
-    grade: gradeFor(c.radius),
-    entry: arcAt(c.startZ)
-  });
-}
+/**
+ * Distance along the road IS the parameter now, so there is no arc-length table
+ * any more. It existed because the old road was parameterised by a straight
+ * axis that ran up to 45% short of the real driving distance, and calling a
+ * corner "in 200m" when it was 280m of road away is the difference between a
+ * note you trust and one you learn to ignore.
+ */
+export const PASS_DISTANCE = PASS_LENGTH;
 
 /** "L2", "R5" — the co-driver's shorthand, and the HUD's whole vocabulary. */
 export const noteText = (c: Corner): string => `${c.dir < 0 ? 'L' : 'R'}${c.grade}`;
 
-/** Where a corner's entry is in the world, for hanging a marker off. */
-export function cornerPoint(c: Corner, z = c.startZ): [number, number] {
-  return [spineX(z), z];
+/** Where a corner's entry is in the world, and which way the road points there. */
+export function cornerPoint(c: Corner): { x: number; z: number; heading: number } {
+  const [x, z] = trackPoint(c.entry);
+  return { x, z, heading: trackHeading(c.entry) };
 }
