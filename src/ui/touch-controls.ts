@@ -21,6 +21,11 @@
  * 3. HORIZONTAL ONLY. The steering pad ignores vertical movement entirely.
  *    Thumbs travel in arcs, so a two-axis reading picks up throttle you never
  *    asked for every time you turn.
+ *
+ * 4. THE PEDALS ARE ONE SURFACE, NOT THREE BUTTONS. A thumb holding GO can
+ *    slide up onto DRIFT and hold both, because keeping your foot on the gas
+ *    through a drift is the whole point of drifting and lifting off to reach a
+ *    second button loses you the corner.
  */
 
 export interface TouchState {
@@ -99,42 +104,87 @@ export function createTouchControls(root: HTMLElement): TouchControls {
   zone.addEventListener('pointerup', endSteer);
   zone.addEventListener('pointercancel', endSteer);
 
-  // ---------- pedals ----------
-  const bindButton = (selector: string, set: (down: boolean) => void) => {
-    const el = root.querySelector<HTMLElement>(selector);
-    if (!el) throw new Error(`missing touch control ${selector}`);
-    let pointer: number | null = null;
+  /* ---------- pedals ----------
+   *
+   * Handled as ONE pointer-tracking surface rather than three independent
+   * buttons, so that a thumb already holding GO can slide up onto DRIFT and
+   * hold both. Keeping your foot on the gas through a drift is the whole point
+   * of drifting, and lifting off to reach a second button loses you the corner.
+   *
+   * The rule: a pointer holds the button it STARTED on, plus whatever button it
+   * is currently over. Slide back down and you are on the throttle alone again.
+   */
+  const buttons = new Map<string, HTMLElement>();
+  for (const key of ['accel', 'brake', 'drift'] as const) {
+    const el = root.querySelector<HTMLElement>(`.btn-${key}`);
+    if (!el) throw new Error(`missing touch control .btn-${key}`);
+    buttons.set(key, el);
+  }
 
-    el.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      pointer = e.pointerId;
-      el.setPointerCapture(e.pointerId);
-      el.classList.add('down');
-      state.active = true;
-      set(true);
-    });
-    const up = (e: PointerEvent) => {
-      if (e.pointerId !== pointer) return;
-      pointer = null;
-      el.classList.remove('down');
-      set(false);
-    };
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-    return el;
+  /** Which buttons each live pointer is holding. */
+  const holds = new Map<number, Set<string>>();
+
+  const hitTest = (x: number, y: number): string | null => {
+    for (const [key, el] of buttons) {
+      const r = el.getBoundingClientRect();
+      // A circle, generously — thumbs are wide and the edges are the bit you miss.
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (Math.hypot(x - cx, y - cy) <= r.width / 2 + 10) return key;
+    }
+    return null;
   };
 
-  bindButton('.btn-accel', d => { state.throttle = d; });
-  bindButton('.btn-brake', d => { state.brake = d; });
-  const driftBtn = bindButton('.btn-drift', d => { state.drift = d; });
+  const applyHolds = () => {
+    const held = new Set<string>();
+    for (const set of holds.values()) for (const key of set) held.add(key);
+    state.throttle = held.has('accel');
+    state.brake = held.has('brake');
+    state.drift = held.has('drift');
+    for (const [key, el] of buttons) el.classList.toggle('down', held.has(key));
+  };
+
+  const pedals = root.querySelector<HTMLElement>('.pedals');
+  if (!pedals) throw new Error('missing .pedals');
+
+  pedals.addEventListener('pointerdown', e => {
+    const key = hitTest(e.clientX, e.clientY);
+    if (!key) return;
+    e.preventDefault();
+    pedals.setPointerCapture(e.pointerId);
+    holds.set(e.pointerId, new Set([key]));
+    state.active = true;
+    applyHolds();
+  });
+
+  pedals.addEventListener('pointermove', e => {
+    const set = holds.get(e.pointerId);
+    if (!set) return;
+    const origin = set.values().next().value as string;
+    const over = hitTest(e.clientX, e.clientY);
+    // Origin is sticky; whatever is under the thumb right now joins it.
+    const next = new Set([origin]);
+    if (over) next.add(over);
+    holds.set(e.pointerId, next);
+    applyHolds();
+  });
+
+  const releasePointer = (e: PointerEvent) => {
+    if (!holds.delete(e.pointerId)) return;
+    applyHolds();
+  };
+  pedals.addEventListener('pointerup', releasePointer);
+  pedals.addEventListener('pointercancel', releasePointer);
+
+  const driftBtn = buttons.get('drift')!;
 
   // A losing-focus safety net: a backgrounded tab never sends pointerup.
   addEventListener('blur', () => {
-    state.throttle = state.brake = state.drift = false;
+    holds.clear();
+    applyHolds();
     state.steer = 0;
     steerPointer = null;
     stick.classList.remove('on');
-    for (const el of root.querySelectorAll('.btn')) el.classList.remove('down');
   });
 
   let lastCharge = -1;

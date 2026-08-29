@@ -42,11 +42,26 @@ moves between modes and **A** confirms, so you never have to reach for the
 screen. The touch controls hide themselves once a pad is in use.
 
 **Touch** — steering on the left, pedals on the right, so the two never compete
-for one thumb. The steering pad has no fixed position: **wherever your thumb
+for one thumb. The pedals are one surface rather than three buttons: **hold GO
+and slide your thumb up onto DRIFT** to hold both, then slide back down. Keeping
+your foot on the gas through a drift is the whole point of drifting. The steering pad has no fixed position: **wherever your thumb
 first lands becomes the centre**, and it reads horizontal movement only. On a
 tablet you cannot see your thumb and are not looking at it anyway, so a control
 with a fixed position is one you keep missing. Everything is multi-touch, so
 steering, throttle and drift work together.
+
+### Bouncing off things
+
+Building footprints are padded with a **circle, not a square**, so corners are
+round and the contact normal turns smoothly through them. Padding each axis
+separately makes every corner a right angle, and clipping one diagonally then
+flips the push-out between x and z from step to step, scrubbing speed each time
+until the truck stops dead — which is exactly what it used to do.
+
+The response is a reflection: the component into the wall comes back out at 35%,
+the component along it survives at 88%. So a graze costs almost nothing, a
+head-on bounces you back, and a deep bite into a corner costs real speed. What
+you lose scales with how you hit it, and nothing parks you.
 
 ### Steering feel
 

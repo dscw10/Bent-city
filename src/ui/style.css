@@ -114,10 +114,15 @@ canvas{display:block}
   background:var(--matcha);border:2.5px solid var(--ink)}
 
 /* Pedals, anchored to the bottom-right corner where a right thumb reaches. */
+/* One surface: the pointer handling lives on the container, so a thumb holding
+   GO can slide onto DRIFT and hold both. */
 .pedals{position:absolute;right:clamp(16px,3vw,40px);bottom:calc(clamp(18px,3vh,40px) + var(--safe-b));
-  display:flex;flex-direction:column;align-items:flex-end;gap:clamp(10px,1.6vh,18px)}
+  display:flex;flex-direction:column;align-items:flex-end;gap:clamp(10px,1.6vh,18px);
+  pointer-events:auto;touch-action:none}
 .pedal-row{display:flex;align-items:flex-end;gap:clamp(10px,1.6vw,18px)}
-.btn{pointer-events:auto;touch-action:none;border-radius:50%;
+/* pointer-events stay off the buttons themselves — .pedals does the hit testing,
+   so a drag between them is one continuous gesture rather than two. */
+.btn{pointer-events:none;touch-action:none;border-radius:50%;
   border:2px solid var(--ink);background:rgba(255,255,255,.42);backdrop-filter:blur(4px);
   color:var(--ink);font-family:inherit;font-weight:700;text-transform:uppercase;
   letter-spacing:.14em;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -128,8 +133,10 @@ canvas{display:block}
 .btn-accel.down{background:rgba(127,166,80,.92)}
 .btn-brake{width:clamp(66px,11.5vmin,102px);height:clamp(66px,11.5vmin,102px);
   font-size:clamp(9px,1.4vmin,12px)}
+/* Centred directly over GO, so "slide up" is the whole gesture. */
 .btn-drift{width:clamp(66px,11.5vmin,102px);height:clamp(66px,11.5vmin,102px);
-  font-size:clamp(9px,1.4vmin,12px);position:relative;--charge:0deg}
+  font-size:clamp(9px,1.4vmin,12px);position:relative;--charge:0deg;
+  margin-right:calc((clamp(84px,15vmin,132px) - clamp(66px,11.5vmin,102px)) / 2)}
 /* The charge ring: a conic gradient driven by one custom property, so updating
    it every frame costs nothing. */
 .btn-drift::before{content:"";position:absolute;inset:-6px;border-radius:50%;

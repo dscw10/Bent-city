@@ -733,6 +733,65 @@ Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
 
+## Corners, bouncing, and drifting on the gas (29 Aug)
+
+Chris, still on the iPad: *"I still want the go button but I think the player
+should drag the button over drifting so they can keep their foot on the gas
+whilst drifting... I am also still getting stuck on the corners of buildings.
+Could you add some kind of bounce physics like in Mario Kart."*
+
+### Getting stuck on corners was a geometry bug
+
+Footprints were padded on each axis separately — a Minkowski sum with a SQUARE.
+That makes the collision surface a right angle at every corner, so the push-out
+is always axis-aligned. Clip one diagonally and the least-penetration axis flips
+between x and z from one step to the next, each flip scrubbing more speed, and
+the truck stops dead on a spot it should have glanced off.
+
+Padding with a CIRCLE instead — take the closest point on the box and push out
+along the line to it — gives a normal that turns smoothly through the corner.
+That one change is most of the fix, and it also produces the corner normal the
+bounce needs, for free.
+
+### The bounce is a reflection, not a stop
+
+The component of velocity INTO the wall comes back out scaled by `RESTITUTION`
+(0.35) and the component ALONG it survives at `TANGENT` (0.88). So the response
+scales with how you hit it, which is the property that makes it feel fair:
+
+| | speed kept |
+|---|---|
+| head on into a face | 35% and reversed |
+| shallow, running along a face | ~88% |
+| grazing a corner | ~83% |
+| biting deep into a corner | ~50% |
+
+Cut deeper, pay more. Nothing parks you.
+
+Yaw is damped on a real thump, or the truck keeps steering itself back into the
+wall it just bounced off.
+
+### Drifting with your foot still on the gas
+
+The pedals are now ONE pointer-tracking surface rather than three independent
+buttons. A pointer holds the button it started on, plus whatever button it is
+currently over — so a thumb holding GO can slide up onto DRIFT and hold both,
+then slide back down to throttle alone. Keeping your foot on the gas through a
+drift is the whole point of drifting, and lifting off to reach a second button
+loses you the corner.
+
+`.btn` had to lose `pointer-events`, so the container does all the hit testing
+and a drag between buttons is one continuous gesture rather than two.
+
+### A note on writing these tests
+
+Three of the collision tests failed first time because the GEOMETRY I set up was
+not the geometry I described. A "30° glancing blow" was actually a head-on hit
+into a different face; a "shallow hit along a wall" was aimed straight at a
+corner. The physics was right every time. Worth remembering: when a collision
+test fails, check where the contact actually happened before touching the
+response.
+
 ## Steering feel (29 Aug)
 
 Chris: *"The steering feels too lively. I think we can suspend reality for this

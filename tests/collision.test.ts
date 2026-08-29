@@ -66,6 +66,117 @@ describe('block collision', () => {
   });
 });
 
+describe('bouncing off buildings', () => {
+  /**
+   * Footprints used to be padded on each axis separately, which makes the
+   * collision surface a right angle at every corner. Clip one diagonally and
+   * the least-penetration axis flips between x and z from step to step, each
+   * flip scrubbing speed, and the truck stops dead on a spot it should have
+   * glanced off. The padding is a circle now, so corners are round and the
+   * normal turns smoothly through them.
+   */
+  const WALL: Block[] = [{ x: 0, z: 0, w: 20, d: 20 }];
+
+  /** One contact in isolation: no engine, no suspension, just the response. */
+  function contact(x: number, z: number, heading: number, speed = 22) {
+    const car = makeCar();
+    resetCar(car, x, z, heading);
+    car.vx = Math.sin(heading) * speed;
+    car.vz = Math.cos(heading) * speed;
+    const dt = 1 / 240;
+    for (let i = 0; i < 4000; i++) {
+      car.x += car.vx * dt;
+      car.z += car.vz * dt;
+      const impact = collideBlocks(car, WALL);
+      if (impact > 0) {
+        return { car, impact, out: Math.hypot(car.vx, car.vz), kept: Math.hypot(car.vx, car.vz) / speed };
+      }
+    }
+    return null;
+  }
+
+  it('bounces back off a flat face taken head on', () => {
+    const r = contact(0, -30, 0);
+    expect(r).not.toBeNull();
+    expect(r!.car.vz).toBeLessThan(0);            // going back the way it came
+    expect(r!.kept).toBeGreaterThan(0.2);         // with a real bounce, not a stop
+    expect(r!.kept).toBeLessThan(0.6);
+  });
+
+  it('keeps most of its speed on a shallow hit', () => {
+    /* Running ALONG the bottom face, angled very slightly into it. Starting x
+       has to be between the corners, or the truck is aimed at a corner and the
+       hit is head-on rather than glancing. */
+    const r = contact(-5, -11.35, Math.PI / 2 - 0.09);
+    expect(r).not.toBeNull();
+    expect(r!.kept).toBeGreaterThan(0.8);
+    expect(r!.car.vx).toBeGreaterThan(0);         // still going the same way
+  });
+
+  it('pushes out diagonally at a corner rather than along an axis', () => {
+    // Approaching the corner at 45°, the normal must be diagonal. With square
+    // padding it would have been purely x or purely z.
+    const car = makeCar();
+    resetCar(car, -10.9, -10.9, Math.PI / 4);
+    const before = { x: car.x, z: car.z };
+    collideBlocks(car, WALL);
+    const movedX = Math.abs(car.x - before.x);
+    const movedZ = Math.abs(car.z - before.z);
+    expect(movedX).toBeGreaterThan(0.05);
+    expect(movedZ).toBeGreaterThan(0.05);
+    // and roughly equally, since the approach was symmetric
+    expect(Math.abs(movedX - movedZ)).toBeLessThan(movedX * 0.35);
+  });
+
+  /**
+   * The actual complaint. What you lose should scale with how deep you cut —
+   * a graze costs almost nothing, a real bite costs real speed — and NEITHER
+   * should ever park you, which is what the old square corners did.
+   */
+  function pastCorner(startX: number) {
+    const car = makeCar();
+    resetCar(car, startX, -26, 0);
+    car.vz = 20;                                   // arrive at speed, as you would
+    const dt = 1 / 60;
+    let slowest = Infinity;
+    for (let i = 0; i < 60 * 4; i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+      collideBlocks(car, WALL);
+      if (car.z > -18) slowest = Math.min(slowest, Math.abs(car.v));
+    }
+    return { z: car.z, slowest };
+  }
+
+  it('lets a graze past almost untouched', () => {
+    const r = pastCorner(11.3);
+    expect(r.z).toBeGreaterThan(10);
+    expect(r.slowest).toBeGreaterThan(14);
+  });
+
+  it('costs real speed for a deep cut, but never parks you', () => {
+    const r = pastCorner(10.9);
+    expect(r.z).toBeGreaterThan(10);               // still got past the building
+    expect(r.slowest).toBeGreaterThan(5);          // and never came close to stopping
+    // A deeper bite must cost more than a graze, or the corner has no shape.
+    expect(r.slowest).toBeLessThan(pastCorner(11.3).slowest);
+  });
+
+  it('never leaves the truck inside a footprint', () => {
+    for (const angle of [0, 0.4, 0.8, 1.2, 2.0, 2.9, -1.1]) {
+      const car = makeCar();
+      resetCar(car, -Math.sin(angle) * 30, -Math.cos(angle) * 30, angle);
+      const dt = 1 / 60;
+      for (let i = 0; i < 60 * 5; i++) {
+        for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+        collideBlocks(car, WALL);
+      }
+      const insideX = Math.abs(car.x) < 10;
+      const insideZ = Math.abs(car.z) < 10;
+      expect(insideX && insideZ).toBe(false);
+    }
+  });
+});
+
 describe('getting unstuck', () => {
   /**
    * Two facing walls used to be resolved in the same pass, pushing the truck
