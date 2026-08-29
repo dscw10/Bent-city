@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { V, TUNE, makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { terrainAt, slopeAt } from '../src/core/terrain';
-import { nodePos, TILE } from '../src/core/city-layout';
+import { nodePos, TILE, PITCH } from '../src/core/city-layout';
 import { P } from '../src/core/config';
 
 /**
@@ -45,16 +45,29 @@ describe('the rollover rule', () => {
 });
 
 describe('straight-line performance', () => {
-  it('reaches 30 m/s in a few seconds and settles at a sane top speed', () => {
-    const { trace } = drive(22, 1, 0);
-    const to30 = trace.find(s => s.v >= 30);
-    expect(to30).toBeDefined();
-    expect(to30!.t).toBeGreaterThan(1.5);
-    expect(to30!.t).toBeLessThan(8);
+  it('accelerates briskly but tops out at a speed a kei truck could reach', () => {
+    const { trace } = drive(30, 1, 0);
+    const to20 = trace.find(s => s.v >= 20);
+    expect(to20).toBeDefined();
+    expect(to20!.t).toBeGreaterThan(1.5);
+    expect(to20!.t).toBeLessThan(6);
 
     const top = Math.max(...trace.map(s => s.v));
-    expect(top).toBeGreaterThan(40);
-    expect(top).toBeLessThan(70);
+    // 25-33 m/s is 90-120 km/h. It used to do 167, which is not a kei truck.
+    expect(top).toBeGreaterThan(23);
+    expect(top).toBeLessThan(34);
+  });
+
+  it('leaves time to read the map at cruising speed', () => {
+    /* A design invariant, not a physics one. The city's block pitch is 58m; at
+       full power the truck used to cross one in 1.9s, which is not long enough
+       to look up at the plan region and act on it. Cruising has to be slower
+       than that or the whole projection goes unused. */
+    /* Measured against P.vMax, the declared reference speed the steering
+       falloff, the bend response and the engine audio all use — not against a
+       peak, which varies by several m/s depending on which hill you measured on. */
+    const cruise = P.vMax * 0.7;
+    expect(PITCH / cruise).toBeGreaterThan(2.2);
   });
 
   it('brakes through a stop and then reverses', () => {

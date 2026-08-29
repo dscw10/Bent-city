@@ -42,7 +42,12 @@ export const V = {
   wheelR: 0.28, susRest: 0.34,
   springK: 17000, damper: 1950, arb: 2000, arbMax: 2500,
   Ipitch: 470, Iroll: 210,
-  drive: 16500, brake: 15000,
+  /* Drive was 16500 and the truck did 46 m/s — 167 km/h, in a 660cc kei truck.
+     Worse than implausible, it was too fast for the city it drives in: at 30
+     m/s a 58m block goes by in 1.9 seconds, which is not enough time to read
+     anything. Slowing it down is as much a fix for the map going unread as it
+     is for the handling. */
+  drive: 8200, brake: 15000,
 
   /* ---- steering feel ----
    *
@@ -161,11 +166,16 @@ export const V = {
   driftChargeTime: 1.9,
   /** A drift shorter than this earns nothing, so a stab of the button is not a boost. */
   driftMinCharge: 0.22,
-  boostForce: 11000,
+  boostForce: 7000,
   /** Seconds of boost from a full charge. */
   boostTime: 1.7,
-  /** Boost fades out as speed approaches this multiple of vMax. */
-  boostCeiling: 1.25,
+  /**
+   * Boost fades out as speed approaches this multiple of vMax. Comfortably
+   * above 1: the whole point of a boost is to take you past what the engine
+   * alone can do, and at 1.25 it had almost no headroom left once the truck was
+   * already near its top speed — which is exactly when you cash one in.
+   */
+  boostCeiling: 1.45,
 
   rollC: 45, rollV: 5, aero: 0.62,
   /** Yaw is hard-limited so the truck can never spin like a top. */
@@ -180,7 +190,17 @@ export const V = {
  * setting rather than a constant, in the same spirit as the bend sliders.
  * 0 is calm and deliberate; 1 is roughly the old instant-response steering.
  */
-export const TUNE = { steerSpeed: 0.28 };
+export const TUNE = {
+  steerSpeed: 0.28,
+  /**
+   * Engine power, as a multiplier on `drive`. A setting rather than a constant
+   * because "how quick should it be" is exactly the sort of thing that needs
+   * driving rather than reasoning about — and because the answer is tangled up
+   * with the city's scale: at 30 m/s a 58m block goes past in 1.9 seconds,
+   * which is not long enough to read anything on the map.
+   */
+  power: 1
+};
 
 /**
  * The two ends of that one dial. Everything about how eager the truck feels
@@ -442,7 +462,7 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
         fLong = braking(thr);                     // rolling back: throttle brakes
       } else if (W.rear) {
         // Rear-wheel drive, which gives power oversteer for free.
-        fLong = V.drive * thr * 0.5 * (1 - 0.80 * Math.min(1, Math.abs(speed) / P.vMax));
+        fLong = V.drive * TUNE.power * thr * 0.5 * (1 - 0.80 * Math.min(1, Math.abs(speed) / P.vMax));
       }
     } else if (thr < 0) {
       const pedal = -thr;
@@ -451,7 +471,7 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
       } else if (W.rear) {
         // Stopped or already reversing: reverse gear, capped at its own top speed.
         const backwards = Math.max(0, -speed);
-        fLong = -V.drive * pedal * V.reverse * (1 - Math.min(1, backwards / V.reverseMax));
+        fLong = -V.drive * TUNE.power * pedal * V.reverse * (1 - Math.min(1, backwards / V.reverseMax));
       }
     }
     // Rolling resistance: a constant part plus a small speed-dependent part.
@@ -483,7 +503,7 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   // The destabilising torque that makes a locked drift something you have to
   // fly. See the note on V.driftYaw.
   if (driftHeld) {
-    tYaw -= car.driftDir * V.driftYaw * clamp(planar / 18, 0, 1);
+    tYaw -= car.driftDir * V.driftYaw * clamp(planar / 14, 0, 1);
   }
 
   // Gravity's component along the hillside — climbs cost speed, descents pay it back.

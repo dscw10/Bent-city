@@ -69,6 +69,7 @@ const screens = new Screens({
 function applySettings(): void {
   projection.intensity = save.settings.bendIntensity;
   TUNE.steerSpeed = save.settings.steering;
+  TUNE.power = save.settings.power;
   audio.setVolume(save.settings.volume);
   audio.setMuted(save.settings.muted);
   // Persist here rather than in each caller: the mute button and the M key

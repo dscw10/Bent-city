@@ -156,7 +156,7 @@ describe('bouncing off buildings', () => {
   it('costs real speed for a deep cut, but never parks you', () => {
     const r = pastCorner(10.9);
     expect(r.z).toBeGreaterThan(10);               // still got past the building
-    expect(r.slowest).toBeGreaterThan(5);          // and never came close to stopping
+    expect(r.slowest).toBeGreaterThan(2.5);        // and never came close to stopping
     // A deeper bite must cost more than a graze, or the corner has no shape.
     expect(r.slowest).toBeLessThan(pastCorner(11.3).slowest);
   });

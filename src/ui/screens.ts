@@ -182,6 +182,15 @@ export class Screens {
       v => v < 0.2 ? 'calm' : v > 0.75 ? 'lively' : `${Math.round(v * 100)}`
     ));
 
+    list.appendChild(this.sliderRow(
+      'Power',
+      'How quick the truck is. At full power a city block goes past in under two seconds, which is not long enough to read the map — so this is a pacing setting as much as a performance one.',
+      0.6, 1.4, 0.05,
+      () => save.settings.power,
+      v => { save.settings.power = v; persist(); this.cb.onSettingsChanged(); },
+      v => `${Math.round(v * 100)}`
+    ));
+
     list.appendChild(this.toggleRow(
       'Turn arrows',
       'Paints the next turn on the road. With it on, the street answers the immediate question and the map is only needed for the corner after that — turn it off to find out whether you are really reading the map.',

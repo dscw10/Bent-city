@@ -26,7 +26,11 @@ export interface BendParams {
   lock: number;
   /** How far speed pushes the bend start outward. 0 = static view. */
   push: number;
-  /** Reference top speed the speed response is measured against. */
+  /**
+   * Reference top speed, m/s. Not decoration: the steering falloff, the
+   * speed-reactive bend and the engine audio are all measured against it, so it
+   * has to track what the truck can actually do.
+   */
   vMax: number;
   /** Camera pulls back and up along one diagonal. */
   camDist: number;
@@ -71,7 +75,7 @@ export const DEFAULT_BEND: BendParams = {
   buildH: 0.31,
   lock: 0.1,
   push: 120,
-  vMax: 55,
+  vMax: 32,
   camDist: 11,
   camAim: 0,
   foldAngle: 90
@@ -122,7 +126,7 @@ export const PRESETS: Preset[] = [
          however fast you go, so the map stays the only source of anything
          beyond the next corner. */
       push: 0,
-      vMax: 55,
+      vMax: 32,
       camDist: 12,
       camAim: 4,
       foldAngle: 90

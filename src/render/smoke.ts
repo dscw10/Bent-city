@@ -52,16 +52,18 @@ export class Smoke {
       p.rot += p.spin * dt;
     }
 
-    // Only the driven wheels smoke, and only when they are near their limit.
+    /* DRIFTING ONLY. Smoke on every scrubbed tyre meant the truck trailed a
+       cloud through any brisk corner, which made a drift look like nothing
+       special — and a drift is meant to be the thing you can see from across
+       the map. */
     const speed = Math.hypot(car.vx, car.vz);
-    if (speed < 3) return;
+    if (!car.drifting || speed < 3) { this.spawnDebt = 0; return; }
 
     let worst = 0;
     for (let i = 0; i < 4; i++) {
       if (WHEELS[i].rear) worst = Math.max(worst, car.slipRatio[i]);
     }
-    const strength = clamp((worst - SMOKE_THRESHOLD) / 0.5, 0, 1) *
-      (car.drifting ? 1 : 0.55);
+    const strength = clamp((worst - SMOKE_THRESHOLD) / 0.5, 0, 1);
     if (strength <= 0.02) { this.spawnDebt = 0; return; }
 
     // Rate scales with how hard the tyres are working and how fast they are

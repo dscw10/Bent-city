@@ -42,9 +42,11 @@ export class Hud {
   show(on: boolean): void { this.root.classList.toggle('on', on); }
 
   setSpeed(mps: number): void {
-    // 2.4 rather than 3.6: the truck's numbers are arcade numbers, and reading
-    // "190" on a kei truck breaks the fiction harder than an inexact conversion.
-    this.speed.textContent = String(Math.round(Math.abs(mps) * 2.4));
+    /* True km/h now. It used to be a fudged 2.4 because the truck did 167 km/h
+       and reading that on a kei truck broke the fiction — but the honest fix
+       was to slow the truck down, and at about 110 km/h flat out the real
+       conversion is the believable one. */
+    this.speed.textContent = String(Math.round(Math.abs(mps) * 3.6));
   }
 
   setClock(remaining: number, total: number, endless: boolean): void {
