@@ -120,6 +120,14 @@ canvas{display:block}
   background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border:1.5px solid var(--ink);
   padding:14px;display:none;pointer-events:auto;z-index:30}
 #tuner.on{display:block}
+/* Preset switcher, at the top of the tuner. */
+.presets{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.preset{text-align:left;padding:9px 11px;border:1.5px solid rgba(154,163,171,.55);
+  background:transparent;cursor:pointer;font-family:inherit;color:var(--ink)}
+.preset.sel{border-color:var(--ink);background:rgba(127,166,80,.12)}
+.preset .name{display:block;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+.preset .desc{display:block;font-size:10px;line-height:1.45;color:#5B646C;margin-top:3px}
+
 .ctrl{margin-bottom:12px}
 .ctrl label{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.16em;
   text-transform:uppercase;color:var(--shadow);margin-bottom:6px}

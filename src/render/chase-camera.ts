@@ -101,8 +101,16 @@ export class ChaseCamera {
     const roll = this.yaw * 0.18;                       // a little bank
     this.camera.up.set(Math.sin(roll), Math.cos(roll), 0);
 
+    /* Where the camera aims decides how much of the frame the map gets, because
+       the map is a plane standing at the end of the fold and you see however
+       much of it falls inside the vertical field of view. Raising the aim
+       trades life-size street at the bottom of the frame for map at the top. */
     const la = this.yaw * 0.50;                         // look partly into the turn
-    this.camera.lookAt(16 * Math.sin(la), this.lookY + this.dist * 0.20, 16 * Math.cos(la));
+    this.camera.lookAt(
+      16 * Math.sin(la),
+      this.lookY + this.dist * 0.20 + P.camAim,
+      16 * Math.cos(la)
+    );
   }
 
   resize(w: number, h: number): void {

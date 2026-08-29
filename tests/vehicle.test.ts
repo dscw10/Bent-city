@@ -57,15 +57,24 @@ describe('straight-line performance', () => {
     expect(top).toBeLessThan(70);
   });
 
-  it('stops when you brake', () => {
+  it('brakes through a stop and then reverses', () => {
+    // Holding the brake used to end at a standstill because there was no
+    // reverse gear. Now it should pass THROUGH zero and back up, which is what
+    // a player holding the pedal actually expects.
     const car = makeCar();
     resetCar(car, nodePos(2), nodePos(2), 0);
     const dt = 1 / 60;
     for (let i = 0; i < 60 * 6; i++) for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
     const before = car.v;
-    for (let i = 0; i < 60 * 5; i++) for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, -1, 0);
     expect(before).toBeGreaterThan(20);
-    expect(Math.abs(car.v)).toBeLessThan(2);
+
+    let slowest = Infinity;
+    for (let i = 0; i < 60 * 5; i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, -1, 0);
+      slowest = Math.min(slowest, Math.abs(car.v));
+    }
+    expect(slowest).toBeLessThan(1);       // it really did come to a stop
+    expect(car.v).toBeLessThan(-3);        // and carried on into reverse
   });
 
   it('dives under braking, which is weight transfer actually working', () => {
@@ -84,6 +93,59 @@ describe('straight-line performance', () => {
     const brakingFront = car.load[0] + car.load[1];
     expect(brakingFront).toBeGreaterThan(cruiseFront * 1.3);
     expect(Math.abs(peakPitch)).toBeGreaterThan(0.005);
+  });
+});
+
+describe('reverse', () => {
+  /**
+   * There was no reverse gear at all: negative input was always a brake
+   * opposing the wheel's current direction, so the instant the truck started
+   * rolling backwards the same input pushed it forwards again. Nose into a
+   * building and you buzzed against it forever.
+   */
+  const hold = (car: ReturnType<typeof makeCar>, seconds: number, thr: number, str = 0) => {
+    const dt = 1 / 60;
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, thr, str);
+    }
+  };
+
+  it('reverses from a standstill and keeps going', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    const z0 = car.z;
+    hold(car, 4, -1);
+    expect(car.v).toBeLessThan(-3);                       // actually moving backwards
+    expect(car.z - z0).toBeLessThan(-8);                  // and has covered ground
+  });
+
+  it('brakes to a stop first when it is rolling forwards', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    hold(car, 5, 1);
+    const cruising = car.v;
+    expect(cruising).toBeGreaterThan(15);
+    hold(car, 1.2, -1);
+    // A second of brake from speed must SLOW it, not fling it into reverse.
+    expect(car.v).toBeGreaterThan(-1);
+    expect(car.v).toBeLessThan(cruising - 5);
+  });
+
+  it('caps reverse well below the forward top speed', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    hold(car, 25, -1);
+    expect(Math.abs(car.v)).toBeLessThan(V.reverseMax + 2);
+    expect(Math.abs(car.v)).toBeLessThan(20);
+  });
+
+  it('lets the throttle stop a reverse and drive out forwards', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    hold(car, 3, -1);
+    expect(car.v).toBeLessThan(-2);
+    hold(car, 4, 1);
+    expect(car.v).toBeGreaterThan(2);
   });
 });
 

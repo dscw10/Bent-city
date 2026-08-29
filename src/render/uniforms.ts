@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { P } from '../core/config';
+import { P, foldRadians } from '../core/config';
 import { TA, TB, TC, TK } from '../core/terrain';
 import { smootherstep, smoothstep } from '../core/math';
 
@@ -20,6 +20,7 @@ export const uniforms = {
   uKmin:     { value: P.kMin },
   uFlat:     { value: P.flat },
   uEase:     { value: P.ease },
+  uPhiMax:   { value: foldRadians(P) },
   uFallA:    { value: 4000 },
   uBuildH:   { value: P.buildH },
   uDelta:    { value: 0 },
@@ -43,13 +44,14 @@ export type BentUniforms = typeof uniforms;
  * drift, the map region visibly detaches from the fold.
  */
 export function computeBendEnd(k: number = P.kMin, steps = 240): void {
-  const sB = P.R * Math.PI / 2;
+  const phiMax = foldRadians(P);
+  const sB = P.R * phiMax;
   const ds = sB / steps;
   let Z = 0, Y = 0;
   for (let i = 0; i < steps; i++) {
     const t = ((i + 0.5) * ds) / sB;
     const kk = 1 + (k - 1) * smoothstep(t);
-    const phi = (Math.PI / 2) * (t + (smootherstep(t) - t) * P.ease);
+    const phi = phiMax * (t + (smootherstep(t) - t) * P.ease);
     Z += kk * Math.cos(phi) * ds;
     Y += kk * Math.sin(phi) * ds;
   }

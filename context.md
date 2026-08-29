@@ -146,25 +146,39 @@ without the vertex cost.
    went dead and there was no error to see. (Hit this 26 Aug.)
 6. **Distant geometry stacks vertically forever.** Fog fade (`uFogStart`/`uFogEnd`)
    dissolves it into the background colour before it becomes a tower of noise.
-7. **`uBuildH` catches you twice.** It scaled the viaducts (see below) and then,
+7. **The arcade grip assist assumed you were going forwards.** It rotates the
+   velocity vector toward the nose; in reverse that means it spends every frame
+   rotating your reverse back into forward motion. It fought the reverse gear to
+   a standstill at 1.5 m/s and looked exactly like the brakes were stuck on. It
+   aligns to the truck's longitudinal AXIS now — whichever end it is actually
+   travelling along. There was also no reverse gear to fight: negative input was
+   always a brake opposing the wheel's direction, so it flipped sign the instant
+   you started rolling back.
+8. **Collision resolved every overlap in one pass, so two facing walls cancelled
+   out** and each scrubbed the velocity, pinning anything that nosed into a
+   narrow gap. It resolves only the deepest overlap now. The gaps themselves
+   were also too narrow — 0.54 units between market stalls, against a truck
+   1.4 wide — so a test now walks every archetype and fails if any two
+   footprints leave a gap the truck cannot fit through.
+9. **`uBuildH` catches you twice.** It scaled the viaducts (see below) and then,
    months later, it scaled the traffic — cars rendered at a third height and
    read as grey shards lying in the road. The rule is one line and applies to
    everything: that uniform scales BUILDING height for map legibility, so
    anything meant to be life size must pre-divide by it, and anything the truck
    drives ON is added after it.
-8. **A moving object cannot be moved with a transform.** Every vertex carries an
+10. **A moving object cannot be moved with a transform.** Every vertex carries an
    anchor naming the bit of hillside to lift it onto, baked in at build time —
    so translating the mesh leaves the anchor stale and the object floats or
    sinks. Moving things (traffic, pedestrians, rivals, rings, the ribbon) are
    re-authored in world space every frame into preallocated buffers. That is
    cheaper than the GC churn of rebuilding a BufferGeometry sixty times a second.
-9. **Markers must be drawn through the seam.** Gameplay measures distance across
+11. **Markers must be drawn through the seam.** Gameplay measures distance across
    the tile wrap, so a drop 60m away really is 60m away — but drawn in home-tile
    coordinates its beacon sat half a city away and the HUD looked like it was
    lying. Marks are positioned on the copy of the city nearest the truck. The
    route is still computed and drawn once; it is only drawn in the tile you are
    standing in.
-10. **Vertical subdivision of a box is pointless, and it was costing four to
+12. **Vertical subdivision of a box is pointless, and it was costing four to
     nine times the geometry of every tall building.** Work the bend through at a
     fixed player-local z: fold angle, local scale, flatten ramp and the point on
     the folded curve are all functions of z alone, and height then enters only
@@ -173,7 +187,7 @@ without the vertex cost.
     not touch y either. Subdividing vertically produced vertices that land
     exactly on the straight edge between the corners. Subdivision along **z** is
     the one that matters: that is the axis the fold consumes.
-11. **Two surfaces that both drape will fight.** The road surface and the
+13. **Two surfaces that both drape will fight.** The road surface and the
     pavement pads each approximate the same curved terrain with their own
     tessellation, and the coarser one pokes through the finer. It showed as a
     sawtooth along every kerb and as white slivers on the horizon. Fixed by
@@ -718,6 +732,61 @@ stress test of exactly this.
 Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
+
+## The projection, revisited (29 Aug) — why the map wasn't being used
+
+Chris, playing on an iPad with a controller: *"I wasn't using the vertical map
+at all. I think this is a problem as it's the whole point."* He asked to try a
+cylinder, or one big constant curve, instead of the fold.
+
+Built it as a switchable preset rather than a replacement — and building it
+turned up three things that are worth writing down, because all three are the
+opposite of what you would assume.
+
+**1. Past 90° the map LEAVES the shot.** The obvious reading of "cylinder" is to
+let the surface keep curving past vertical. It does, and the far field promptly
+curls over and behind the camera: at a 130° fold the city 500m out lands at
+local z = −33, y = +139. It is above and behind your head. Worse, a plane at 90°
+is precisely the orientation that faces the camera squarely, so it presents its
+maximum screen area — tilt past that and it foreshortens toward nothing. **More
+cylinder gives you less map, not more.** 90° is not an arbitrary stopping point.
+
+**2. Bringing the fold closer also gives you less map.** The second obvious
+move — start the curve near the truck so there is less life-size street — pushes
+the map plane's bottom edge UP out of frame. The frame is 58° tall; the fold
+preset's distant plane has its bottom edge about 1–6° above the lens, so it fills
+the upper half, whereas a fold at z0 = 10 puts that edge 18° up where only a
+sliver fits. Both intuitions are wrong for the same reason: what matters is not
+where the fold is, it is **what fraction of the map plane falls inside the
+vertical field of view.**
+
+**3. The control that was actually missing is camera aim.** Nothing pointed the
+camera up. Adding `camAim` — how far above the road it looks — is what trades
+street at the bottom of the frame for map at the top, and it is the only lever
+that directly sets the map's share. It is a small number: the truck already sits
+23° below the lens, so past about 6m of aim it leaves the shot entirely. The
+first attempt at 17 lost the truck completely.
+
+With those understood the numbers stop being guesswork. The frame is ±29°, the
+truck is at −23°, and the map's bottom edge wants to be a few degrees above the
+lens. The Cylinder preset lands it at 3.5° for 44% of the frame, against the
+Fold preset's 40% — while being a genuine constant-radius arc with no easing and
+no hard horizon.
+
+### The likelier culprit, though, is not the curve at all
+
+Two things conspire to make the map optional, and neither is the projection:
+
+- **Speed push.** At the Fold defaults the life-size street grows from 70 to 190
+  units at speed. That is three blocks of ordinary perspective, which is more
+  than enough to drive by.
+- **Turn arrows.** They were added so the map would be free to be about the
+  decision AFTER the next junction. Combined with a three-block street, there is
+  nothing left for it to be about at all.
+
+So the Cylinder preset sets `push` to 0, and turn arrows are now a setting you
+can switch off. Turning them off is the sharpest available test of whether the
+map is carrying its weight, and it costs one tap rather than a rebuild.
 
 ## Performance (28 Aug)
 

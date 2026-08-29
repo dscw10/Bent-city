@@ -1,4 +1,4 @@
-import { P, DEFAULT_BEND } from '../core/config';
+import { P, PRESETS, foldRadians } from '../core/config';
 import type { BendParams } from '../core/config';
 import { uniforms, computeBendEnd } from '../render/uniforms';
 
@@ -45,8 +45,13 @@ export const SLIDERS: Slider[] = [
     apply: v => { uniforms.uBuildH.value = v; } },
   { key: 'lock', label: 'Map lock', min: 0, max: 1, step: 0.01, decimals: 2,
     hint: '0.00 turns the map with you. 1.00 world-locks it so north stays north and only the transition band twists. In between, the map swings lazily behind your turns.' },
+  { key: 'foldAngle', label: 'Fold angle', min: 45, max: 200, step: 1, decimals: 0,
+    hint: '90° is a street with a flat map panel above it, separated by a hard horizon. Past 90° the ground keeps curving over toward you, so there is no horizon and no separate panel — one continuous gradient instead. This is the difference between the two presets.',
+    apply: () => { uniforms.uPhiMax.value = foldRadians(P); computeBendEnd(); } },
   { key: 'camDist', label: 'Camera distance', min: 5, max: 46, step: 0.5, decimals: 1,
-    hint: 'Pulls back and up along one diagonal.' }
+    hint: 'Pulls back and up along one diagonal.' },
+  { key: 'camAim', label: 'Map framing', min: -6, max: 14, step: 0.5, decimals: 1,
+    hint: 'How far above the road the camera looks, in metres. Trades street at the bottom of the frame for map at the top. Small numbers: past about 6 the truck starts leaving the shot, because it already sits 23° below the lens.' }
 ];
 
 export interface Tuner {
@@ -79,6 +84,7 @@ export function createTuner(
       P[s.key] = v;
       out.textContent = v.toFixed(s.decimals);
       s.apply?.(v);
+      detectPreset();
       onChange?.();
     });
     inputs.set(s.key, input);
@@ -86,16 +92,40 @@ export function createTuner(
     panel.appendChild(wrap);
   }
 
-  const reset = document.createElement('button');
-  reset.className = 'tuner-reset';
-  reset.textContent = 'Reset to defaults';
-  reset.addEventListener('click', () => {
-    Object.assign(P, DEFAULT_BEND);
-    applyAll();
-    api.syncFromParams();
-    onChange?.();
-  });
-  panel.appendChild(reset);
+  // Presets go at the TOP, above the sliders. The two projections are different
+  // things rather than two ends of one scale, and getting from one to the other
+  // by hand means moving ten sliders — which on a touchscreen nobody will do.
+  const presets = document.createElement('div');
+  presets.className = 'presets';
+  for (const preset of PRESETS) {
+    const btn = document.createElement('button');
+    btn.className = 'preset';
+    btn.innerHTML = `<span class="name">${preset.name}</span><span class="desc">${preset.blurb}</span>`;
+    btn.addEventListener('click', () => {
+      Object.assign(P, preset.values);
+      applyAll();
+      api.syncFromParams();
+      markSelected(preset.id);
+      onChange?.();
+    });
+    btn.dataset.preset = preset.id;
+    presets.appendChild(btn);
+  }
+  panel.insertBefore(presets, panel.firstChild);
+
+  function markSelected(id: string): void {
+    for (const b of presets.querySelectorAll<HTMLElement>('.preset')) {
+      b.classList.toggle('sel', b.dataset.preset === id);
+    }
+  }
+
+  /** Highlight whichever preset the live numbers currently match, if any. */
+  function detectPreset(): void {
+    const match = PRESETS.find(preset =>
+      (Object.keys(preset.values) as Array<keyof BendParams>)
+        .every(k => Math.abs(P[k] - preset.values[k]) < 1e-6));
+    markSelected(match?.id ?? '');
+  }
 
   const hint = document.createElement('div');
   hint.className = 'hint';
@@ -107,6 +137,7 @@ export function createTuner(
     uniforms.uEase.value = P.ease;
     uniforms.uFlat.value = P.flat;
     uniforms.uBuildH.value = P.buildH;
+    uniforms.uPhiMax.value = foldRadians(P);
     computeBendEnd(P.kMin);
   }
 
@@ -125,9 +156,12 @@ export function createTuner(
         inputs.get(s.key)!.value = String(P[s.key]);
         readouts.get(s.key)!.textContent = P[s.key].toFixed(s.decimals);
       }
+      detectPreset();
     }
   };
 
   button.addEventListener('click', () => api.toggle());
+  applyAll();
+  api.syncFromParams();
   return api;
 }

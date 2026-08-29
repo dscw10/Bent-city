@@ -13,6 +13,8 @@ import { Game } from './game/game';
 import type { Mode } from './game/modes';
 import { nodePos } from './core/city-layout';
 import { save, applySavedBend, captureBend, persist } from './game/storage';
+import { P } from './core/config';
+import { uniforms } from './render/uniforms';
 import { GameAudio } from './audio';
 
 /* ---------------------------------------------------------------------------
@@ -400,6 +402,17 @@ if (import.meta.env.DEV) {
     kinds: world.city.kinds.flat().reduce<Record<string, number>>(
       (acc, k) => { acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
     blocks: world.city.blocks.length,
-    visibleTiles: world.visibleTiles
+    visibleTiles: world.visibleTiles,
+    bend: { ...P },
+    uniforms: {
+      uZ0: uniforms.uZ0.value,
+      uR: uniforms.uR.value,
+      uKmin: uniforms.uKmin.value,
+      uEase: uniforms.uEase.value,
+      uPhiMaxDeg: uniforms.uPhiMax.value * 180 / Math.PI,
+      uFallA: uniforms.uFallA.value,
+      uBendEnd: [uniforms.uBendEnd.value.x, uniforms.uBendEnd.value.y],
+      uFogEnd: uniforms.uFogEnd.value
+    }
   });
 }

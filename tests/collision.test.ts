@@ -3,8 +3,10 @@ import { makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { collideBlocks } from '../src/vehicle/collision';
 import { Dispatch } from '../src/game/dispatch';
 import { findMode } from '../src/game/modes';
-import { nodePos, TILE, wrapDist } from '../src/core/city-layout';
+import { nodePos, TILE, wrapDist, wrapDelta } from '../src/core/city-layout';
 import type { Block } from '../src/render/city';
+import { PAD } from '../src/vehicle/collision';
+import { buildCityBlocks } from './helpers/city-blocks';
 
 /**
  * Collision is per BUILDING rather than per block, which is what keeps
@@ -61,6 +63,73 @@ describe('block collision', () => {
     // No footprint means no wall: cutting the corner has to stay possible.
     const car = driveInto([], nodePos(2) + 20, nodePos(2) + 20, 0, 4);
     expect(Math.abs(car.v)).toBeGreaterThan(5);
+  });
+});
+
+describe('getting unstuck', () => {
+  /**
+   * Two facing walls used to be resolved in the same pass, pushing the truck
+   * opposite ways and scrubbing its speed from both sides at once. A truck that
+   * had nosed into a narrow gap was pinned there with no way out.
+   */
+  it('does not pin the truck between two facing walls', () => {
+    const car = makeCar();
+    resetCar(car, 0, 0, 0);
+    // A gap barely wider than the truck, walls either side.
+    const blocks: Block[] = [
+      { x: -4, z: 0, w: 4, d: 30 },
+      { x: 4, z: 0, w: 4, d: 30 }
+    ];
+    const dt = 1 / 60;
+    let moved = 0;
+    for (let i = 0; i < 60 * 3; i++) {
+      const before = car.z;
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, -1, 0);
+      collideBlocks(car, blocks);
+      moved += Math.abs(car.z - before);
+    }
+    expect(moved).toBeGreaterThan(5);
+    expect(Math.abs(car.v)).toBeGreaterThan(1);
+  });
+
+  it('reverses back out of a building it has driven into', () => {
+    const wall: Block[] = [{ x: 0, z: 30, w: 40, d: 40 }];
+    const car = makeCar();
+    resetCar(car, 0, 0, 0);
+    const dt = 1 / 60;
+    // Drive at it until it stops us.
+    for (let i = 0; i < 60 * 4; i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+      collideBlocks(car, wall);
+    }
+    const stuckAt = car.z;
+    // Now back off.
+    for (let i = 0; i < 60 * 3; i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, -1, 0);
+      collideBlocks(car, wall);
+    }
+    // Measured through the wrap: reversing past zero puts car.z near TILE.
+    expect(wrapDelta(car.z, stuckAt)).toBeLessThan(-6);
+  });
+
+  it('leaves every alley in the city wide enough for the truck', () => {
+    // Whatever the block layouts do, no two footprints may leave a gap the
+    // truck cannot fit through — that is a wedge trap, not a shortcut.
+    const city = buildCityBlocks();
+    let worst = Infinity;
+    for (let i = 0; i < city.length; i++) {
+      for (let j = i + 1; j < city.length; j++) {
+        const a = city[i], b = city[j];
+        const gapX = Math.abs(a.x - b.x) - (a.w + b.w) / 2 - 2 * PAD;
+        const gapZ = Math.abs(a.z - b.z) - (a.d + b.d) / 2 - 2 * PAD;
+        // Only pairs that actually face each other across a gap count.
+        const facesX = Math.abs(a.z - b.z) < (a.d + b.d) / 2;
+        const facesZ = Math.abs(a.x - b.x) < (a.w + b.w) / 2;
+        if (facesX && gapX > 0) worst = Math.min(worst, gapX);
+        if (facesZ && gapZ > 0) worst = Math.min(worst, gapZ);
+      }
+    }
+    expect(worst).toBeGreaterThan(1.5);
   });
 });
 

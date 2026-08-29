@@ -1,4 +1,4 @@
-import { P } from '../core/config';
+import { P, foldRadians } from '../core/config';
 import { uniforms, computeBendEnd } from './uniforms';
 import { approach, clamp, shortAngle, smoothstep } from '../core/math';
 import type { Car } from '../vehicle/vehicle';
@@ -90,7 +90,7 @@ export class Projection {
     uniforms.uDelta.value = shortAngle(car.a - this.aLag);
 
     // The twist band sits over the fold, wherever the fold currently is.
-    const sB = P.R * Math.PI / 2;
+    const sB = P.R * foldRadians(P);
     uniforms.uRampA.value = this.zDyn * 0.45;
     uniforms.uRampB.value = this.zDyn + sB;
 

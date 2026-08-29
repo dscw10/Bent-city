@@ -167,6 +167,13 @@ export class Screens {
       v => { save.settings.cityLife = v; persist(); this.cb.onSettingsChanged(); }
     ));
 
+    list.appendChild(this.toggleRow(
+      'Turn arrows',
+      'Paints the next turn on the road. With it on, the street answers the immediate question and the map is only needed for the corner after that — turn it off to find out whether you are really reading the map.',
+      () => save.settings.turnArrows,
+      v => { save.settings.turnArrows = v; persist(); this.cb.onSettingsChanged(); }
+    ));
+
     // A controller readout. A pad does not exist to the browser until a button
     // is pressed on it, so "not detected" is genuinely ambiguous and the row
     // has to say what to do about it rather than just reporting a negative.

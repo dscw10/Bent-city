@@ -20,6 +20,12 @@ export interface Settings {
   bendIntensity: number;
   /** Show traffic and pedestrians. Off is a meaningful performance lever. */
   cityLife: boolean;
+  /**
+   * Paint a turn arrow at the next junction. On, the near field answers the
+   * immediate question and the map is only needed for the one after it. Off is
+   * the sharpest test of whether the map is carrying its weight.
+   */
+  turnArrows: boolean;
   bend: BendParams;
 }
 
@@ -37,6 +43,7 @@ const DEFAULTS: SaveData = {
     muted: false,
     bendIntensity: 1,
     cityLife: true,
+    turnArrows: true,
     bend: { ...DEFAULT_BEND }
   },
   best: {},

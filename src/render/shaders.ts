@@ -34,7 +34,6 @@ export const TERRAIN_GLSL = /* glsl */ `
   }`;
 
 export const BEND_GLSL = /* glsl */ `
-  #define HALFPI 1.5707963
 
   // Scale ramp: 1.0 (life size, at the truck) -> uKmin (zoomed out, on the map).
   // Because k is CONSTANT past the fold, straight roads stay straight there and
@@ -51,16 +50,23 @@ export const BEND_GLSL = /* glsl */ `
   // Easing toward smootherstep ramps curvature in and out from zero. This is the
   // same problem highway engineers solve with a clothoid on a slip road, and the
   // same reason industrial designers use G2 blends rather than G1.
+  //
+  // uPhiMax is how far round the world folds. At 90° the surface ends up
+  // vertical and then continues as a flat plane — a street with a map panel
+  // above it. Past 90° it keeps curving over toward you and there is no
+  // vertical plane and no horizon line at all, just one continuous gradient
+  // from under the wheels to overhead. That single uniform is the difference
+  // between a FOLD and a CYLINDER.
   float phiOf(float t){
     float sm = t*t*t*(t*(t*6.0 - 15.0) + 10.0);
-    return HALFPI * mix(t, sm, uEase);
+    return uPhiMax * mix(t, sm, uEase);
   }
 
   vec3 bend(vec3 p, float z0, float R){
     float s = p.z - z0;
     if(s <= 0.0) return p;                 // near field: untouched, life size
 
-    float sB  = R * HALFPI;                // raw distance the fold occupies
+    float sB  = R * uPhiMax;               // raw distance the fold occupies
     float t   = min(s / sB, 1.0);
     float phi = phiOf(t);                  // fold angle: 0 -> 90 degrees
     float k   = kOf(t);                    // local scale at this point
@@ -122,7 +128,7 @@ export const BENT_VERT = /* glsl */ `
   uniform mat4 uW2P;      // world -> player-local (LAGGED heading)
   uniform mat4 uP2W;      // and back again, for locally-authored meshes
   uniform float uLocal;   // 1.0 if this mesh is authored in player-local space
-  uniform float uZ0, uR, uKmin, uFlat, uEase, uFallA, uBuildH;
+  uniform float uZ0, uR, uKmin, uFlat, uEase, uFallA, uBuildH, uPhiMax;
   uniform float uDelta, uRampA, uRampB, uFogStart, uFogEnd;
   uniform vec2 uBendEnd;  // where the fold ends, integrated on the CPU
   uniform vec3 uTerr;     // hill amplitudes

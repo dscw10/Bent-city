@@ -44,6 +44,14 @@ export const V = {
   Iyaw: 560, Ipitch: 470, Iroll: 210,
   drive: 16500, brake: 15000, maxSteer: 0.66,
   /**
+   * Reverse. Deliberately weak and speed-limited: a kei truck reverses like a
+   * kei truck, and a fast reverse turns every mistake into a rewind rather than
+   * a consequence.
+   */
+  reverse: 0.30, reverseMax: 11,
+  /** Below this wheel speed the truck counts as stopped, and can change gear. */
+  stopped: 0.6,
+  /**
    * Front cornering stiffness deliberately HIGHER than rear. Understeer means
    * the front saturates before the rear, so the fix is at the front — not more
    * grip everywhere.
@@ -188,13 +196,36 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
     const slip = Math.atan2(vs, Math.abs(vf) + 1.0);
     let fLat = -slip * (W.front ? V.cornerF : V.cornerR) * Fn;
 
+    /* Longitudinal force. There are FOUR cases here, not two, and getting that
+       wrong is what left the truck unable to reverse out of a building.
+ 
+       The old version treated any negative input as a brake opposing the wheel's
+       current direction. From a standstill that does nudge you backwards — but
+       the instant the wheel starts turning backwards the sign flips and the very
+       same input pushes you forwards again. You buzz against the wall and never
+       get anywhere, with nothing on screen to explain why.
+ 
+       So each pedal means "go this way", and becomes a brake only when the truck
+       is already going the other way. That is also what a player expects: hold
+       brake to stop, keep holding to reverse; blip throttle to stop reversing. */
+    const braking = (bias: number) => V.brake * bias * (W.front ? 0.31 : 0.19);
     let fLong = 0;
-    if (thr > 0 && W.rear) {
-      // Rear-wheel drive, which gives power oversteer for free.
-      fLong = V.drive * thr * 0.5 * (1 - 0.80 * Math.min(1, Math.abs(speed) / P.vMax));
+    if (thr > 0) {
+      if (vf < -V.stopped) {
+        fLong = braking(thr);                     // rolling back: throttle brakes
+      } else if (W.rear) {
+        // Rear-wheel drive, which gives power oversteer for free.
+        fLong = V.drive * thr * 0.5 * (1 - 0.80 * Math.min(1, Math.abs(speed) / P.vMax));
+      }
     } else if (thr < 0) {
-      // Rearward-biased brakes, so lifting and braking both settle the nose.
-      fLong = -Math.sign(vf || 1) * V.brake * -thr * (W.front ? 0.31 : 0.19);
+      const pedal = -thr;
+      if (vf > V.stopped) {
+        fLong = -braking(pedal);                  // rolling forward: brake
+      } else if (W.rear) {
+        // Stopped or already reversing: reverse gear, capped at its own top speed.
+        const backwards = Math.max(0, -speed);
+        fLong = -V.drive * pedal * V.reverse * (1 - Math.min(1, backwards / V.reverseMax));
+      }
     }
     // Rolling resistance: a constant part plus a small speed-dependent part.
     const rr = off ? 5 : 1;
@@ -245,13 +276,22 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
   car.rollRate *= (1 - 1.1 * h);
   car.yaw = clamp(car.yaw, -V.maxYawRate, V.maxYawRate);
 
-  // Velocity redirection — see the note on V.assist.
+  /* Velocity redirection — see the note on V.assist.
+ 
+     It aligns the velocity with the truck's LONGITUDINAL AXIS, not with its
+     nose. That distinction only matters in reverse, and it matters completely:
+     aligning to the nose means that when you are travelling backwards the
+     assist spends every frame rotating your velocity back around to forwards.
+     It fought the reverse gear to a standstill at 1.5 m/s and looked for all
+     the world like the brakes were stuck on. */
   const grounded = load[0] + load[1] + load[2] + load[3] > 0;
   const spd2 = Math.hypot(car.vx, car.vz);
   if (grounded && spd2 > 1.0) {
     const vdir = Math.atan2(car.vx, car.vz);
-    let offA = car.a - vdir;
-    offA = Math.atan2(Math.sin(offA), Math.cos(offA));
+    const toNose = Math.atan2(Math.sin(car.a - vdir), Math.cos(car.a - vdir));
+    // Whichever end of the axis we are actually travelling along.
+    const axis = Math.abs(toNose) > Math.PI / 2 ? car.a + Math.PI : car.a;
+    const offA = Math.atan2(Math.sin(axis - vdir), Math.cos(axis - vdir));
     const na = vdir + offA * Math.min(1, V.assist * h);
     car.vx = Math.sin(na) * spd2;
     car.vz = Math.cos(na) * spd2;

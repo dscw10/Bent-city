@@ -299,7 +299,7 @@ export class Game {
 
     const path = unwrapPath(this.displayRoute(car), car.x, car.z);
     drawRibbon(b, path);
-    this.drawNextTurn(b, car, path);
+    if (save.settings.turnArrows) this.drawNextTurn(b, car, path);
 
     // Bakeries. Ring only, unless the truck is empty — in which case one of
     // them is where you are actually going, and it earns the beacon.

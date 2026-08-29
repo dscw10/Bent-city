@@ -113,10 +113,14 @@ export function buildings(ctx: BlockContext): void {
 
   const n = 1 + ((rnd() * 4) | 0);
   const cells: Array<[number, number]> = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  /* The 0.34 below used to be 0.40, which at the top of its size range left a
+     gap of 0.7 units between neighbouring buildings — narrower than the truck.
+     Nose into one and you wedged between two opposing push-outs. Now the worst
+     case is 3.4 units, so every alley is a real alley. */
   for (let q = 0; q < n; q++) {
     const [ox, oz] = n === 1 ? [0, 0] : cells[q];
-    const w = (n === 1 ? BLOCK * 0.78 : BLOCK * 0.40) * (0.8 + rnd() * 0.2);
-    const d = (n === 1 ? BLOCK * 0.78 : BLOCK * 0.40) * (0.8 + rnd() * 0.2);
+    const w = (n === 1 ? BLOCK * 0.78 : BLOCK * 0.34) * (0.8 + rnd() * 0.2);
+    const d = (n === 1 ? BLOCK * 0.78 : BLOCK * 0.34) * (0.8 + rnd() * 0.2);
     const h = 6 + Math.pow(rnd(), 2.4) * 54;
     const roof = rnd() < 0.10 ? C.matcha : roofTone(h);
     ctx.push({ x: cx + ox * BLOCK * 0.24, z: cz + oz * BLOCK * 0.24, w, d });
@@ -135,13 +139,17 @@ export function buildings(ctx: BlockContext): void {
 export function market(ctx: BlockContext): void {
   const { b, cx, cz, rnd } = ctx;
   b.slab(cx, cz, BLOCK, BLOCK, 0.09, C.kerb, 8);
+  /* Stalls are 0.55 of the cell, not 0.80. At 0.80 neighbouring stalls left a
+     gap of 0.54 units — narrower than the truck — so the market was a solid
+     block that also wedged anyone who nosed into it. At 0.55 the lanes between
+     them are 3.6 units, which is a slalom you can just about take at speed. */
   const cell = BLOCK * 0.28;
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
       const x = cx + i * BLOCK * 0.30;
       const z = cz + j * BLOCK * 0.30;
       const h = 5 + rnd() * 4;
-      tower(ctx, x, z, cell * 0.8, cell * 0.8, h, C.face,
+      tower(ctx, x, z, cell * 0.55, cell * 0.55, h, C.face,
         rnd() < 0.3 ? C.melon : [0.86, 0.87, 0.89]);
     }
   }
