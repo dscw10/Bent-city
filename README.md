@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run dev` | Vite dev server with hot reload |
 | `npm run build` | Typecheck, then build a static site into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
-| `npm test` | 118 headless tests over the rules, the physics, collision and the pass |
+| `npm test` | 125 headless tests over the rules, the physics, collision and the pass |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run check` | Typecheck and tests — run this before committing |
 
@@ -94,11 +94,30 @@ and the truck lands already rotating — all of it falling out of the raycast
 suspension from one vertical impulse. **The direction you are steering as it
 lands is the drift you get**, so entry is a deliberate flick.
 
-Once locked, a constant yaw torque pushes the slide further out, so **you have
-to counter-steer to hold it**. Do nothing and you spin out in about a second and
-a half and lose the charge. Over-correct and the slide dies and earns nothing.
-Charge builds fastest around 32° of slip, so the reward is for holding an angle
-rather than for provoking the biggest slide you can.
+Once locked, the stick stops being a steering input and becomes **a choice of
+angle**, as it is in Mario Kart. Held into the turn you get a tight drift; let
+go and you get a middle one; hold it against the drift and you get a wide, fast
+one. All three turn the same way — counter-steer gives you a *wider version of
+the same corner*, never the opposite one — and none of them can spin you out.
+
+The bargain is in the numbers. Over two seconds of corner from 20 m/s:
+
+| stick | turned | speed held | charge | speed 1.6s later |
+|---|---|---|---|---|
+| into the drift | 109° | 11.5 | full | 24.0 |
+| released | 88° | 15.7 | 0.56 | 21.2 |
+| against it | 46° | 22.9 | 0.23 | 23.2 |
+| *gripping, full lock* | *89°* | *19.3* | — | *23.0* |
+
+A committed drift is the slowest way through a corner and the fastest way out
+of one. Charge is time-based and runs faster with the stick hard over, so
+committing pays — but you cannot farm it down a straight, because landing a hop
+with no input and no rotation is just a hop.
+
+Two things make it progressive rather than snappy: the target angle itself may
+only travel so fast, so slamming the stick is a lean and not a step; and the
+front wheels give up two thirds of their lock while drifting, because one stick
+cannot do two jobs at full authority.
 
 Releasing cashes the charge in as a boost. Boost is the one place a force is
 applied to the body rather than through the tyres, because a boost that went
@@ -115,7 +134,7 @@ are live at once, each with its own countdown; rival couriers are racing you for
 the same ones, and roadworks move around the city. Deliveries put time back on
 the clock, so a shift lasts exactly as long as you keep earning it.
 
-Three modes:
+Three modes in the city:
 
 - **Evening shift** — the standard run. Two rivals, roadworks that move.
 - **Rush hour** — shorter clock, tighter orders, four rivals, half the city shut.

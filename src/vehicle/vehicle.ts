@@ -128,43 +128,102 @@ export const V = {
   /** Below this you cannot start a drift; a hop from walking pace is not a drift. */
   driftMinSpeed: 7,
 
-  /* ---- holding a drift: counter-steer ----
+  /* ---- holding a drift: AN ANGLE YOU CHOOSE ----
    *
-   * Once locked, the truck keeps rotating on its own. Steering INTO the slide
-   * deepens it, steering AGAINST it — counter-steering — is what holds the
-   * angle. Do nothing and the slip keeps growing until you spin out and lose
-   * the charge, so a drift is something you fly rather than something you hold.
+   * This is modelled on Mario Kart rather than on a car, and the difference is
+   * the whole point. In Mario Kart the stick does not apply a torque during a
+   * drift — it SELECTS how far round the drift sits, within a bounded range:
+   * held into the turn gives a tight drift, released gives a middle one, held
+   * against it gives a wide one. The kart then travels to that angle. You
+   * cannot spin out of a drift, and there is no fight to lose.
+   *
+   * What was here before was a fight: a constant destabilising torque pushing
+   * the slide out, and counter-steer authority pulling it back. Measured, from
+   * 23 m/s, holding the stick into the drift reached 135 degrees a second of
+   * yaw and spun out inside 1.25 seconds, dumping the truck to 8 m/s — and
+   * "steer further in" is the first thing anybody tries. That is what "steers
+   * too sharply" was.
+   *
+   * So the target slip angle is a lerp across these three, and the truck is
+   * flown to it by a PD controller. Both halves of "progressive" live here: the
+   * TARGET itself may only travel at driftAim rad/s, so slamming the stick is
+   * not a step input, and the controller then has to close the remaining gap
+   * against real inertia.
    */
-  counterAuthority: 6.5,
-  /** Assist multiplier while steering further into the slide. */
-  driftInto: 0.35,
-  /** Slip angle at which the drift is lost and the charge with it. */
-  driftSpin: 1.20,
-  /** Charge builds fastest at this slip angle, and falls off either side. */
-  driftSweet: 0.55,
-  driftSweetWidth: 0.45,
+  driftWide: 0.18,        // rad of slip with the stick held against the drift
+  driftMid: 0.38,         // rad with the stick released
+  driftTight: 0.58,       // rad with the stick held into the drift
+  /** How fast the TARGET may travel, rad/s. This is the progressiveness dial. */
+  driftAim: 1.5,
   /**
-   * Yaw torque pushing the slide FURTHER out, all the time the drift is locked.
+   * Speed, in m/s, at which the full drift angle is available. Below it the
+   * target tapers.
    *
-   * This is what makes counter-steer necessary rather than optional. Without
-   * it, cutting the rear grip is not enough to sustain a slide on its own — the
-   * truck simply tracked straight and a drift was something you had to keep
-   * provoking. With it, doing nothing walks you into a spin, and holding the
-   * angle is an active job.
+   * Without this a held drift is a death spiral: the controller holds 33
+   * degrees of slip whatever the speed, and at 33 degrees the tyres scrub so
+   * hard that four seconds of it takes the truck from 20 m/s to 6 and then
+   * keeps it there, spinning slowly. A kart cannot hold a big drift angle at
+   * walking pace and neither should this.
    */
-  driftYaw: 2600,
+  driftFullSpeed: 16,
+  driftMinAngle: 0.35,    // fraction of the target that survives at a crawl
+  /** Yaw torque per radian of error, and per rad/s of closing speed. */
+  driftHold: 9000,
+  driftDamp: 1500,
+  /** Ceiling on the controller's torque, so a big error is still a lean-in. */
+  driftHoldMax: 4600,
+  /**
+   * How much of the normal steering lock survives a drift.
+   *
+   * The other half of the fix. While drifting the stick is choosing a drift
+   * angle, so leaving the front wheels on full lock as well means one input
+   * doing two jobs and the truck darting. A third of the lock is enough to
+   * place the nose and not enough to fight the controller.
+   */
+  driftSteer: 0.34,
+  /**
+   * How far the front wheels still point INTO the corner at full counter-steer.
+   *
+   * Without this, holding away from the drift steered the truck the other way:
+   * the front axle can make about 6800 N·m and the drift controller is clamped
+   * to a fifth of that, so the stick simply won. Which is not what counter-steer
+   * means in a kart game — there, holding away gives you a WIDE version of the
+   * same corner, never the opposite one. So while drifting the stick no longer
+   * reaches the wheels directly; it slides them between pointing hard into the
+   * corner and pointing very slightly into it.
+   */
+  driftSteerMin: 0.10,
+  /** Slip angle at which the drift is lost. A safety valve, not a mechanic:
+   *  the target is bounded well below it, so reaching it means something hit
+   *  you or the ground did something unexpected. */
+  driftSpin: 1.35,
   /**
    * Body slip angle, in radians, above which a drift counts as a drift.
    *
-   * Set above the wander that full throttle alone produces. Holding the button
-   * flat out down a straight does eventually get squirrely — that is honest
-   * power oversteer with the rear grip cut — but it takes seconds, scrubs speed
-   * and charges far slower than simply taking the corner you were going to take
-   * anyway. So it is never worth farming.
+   * Set above the wander that full throttle alone produces, and just below the
+   * wide-drift target — so a drift held on full counter-steer still charges,
+   * slowly, which is what Mario Kart does too.
    */
-  driftSlip: 0.20,
-  /** Full charge takes this many seconds of genuinely sideways drifting. */
-  driftChargeTime: 1.9,
+  driftSlip: 0.16,
+  /** Below this fraction of driftMinSpeed a drift ends: a slow pirouette is not
+   *  a drift, and holding one was free rotation. */
+  driftDropSpeed: 0.6,
+  /**
+   * Charge is TIME-BASED, as it is in Mario Kart: a counter that runs while you
+   * are drifting, faster when the stick is held hard over. The documented rates
+   * there are 5 per frame past 45 degrees of stick and 2 below it, hence 2.5.
+   *
+   * It replaced a sweet-spot band that paid out fastest at one exact slip
+   * angle. That was precise and unreadable — you could not see your own slip
+   * angle to hold it — and it rewarded a skill the player had no instrument
+   * for. Committing to the corner is legible; holding 32 degrees is not.
+   */
+  driftHardRate: 2.5,
+  /** Stick deflection past which the charge runs at the faster rate. */
+  driftHardStick: 0.5,
+  /** Yaw rate, rad/s, that counts as "already turning" for a hands-off hop. */
+  driftHopYaw: 0.35,
+  driftChargeTime: 2.2,
   /** A drift shorter than this earns nothing, so a stab of the button is not a boost. */
   driftMinCharge: 0.22,
   boostForce: 7000,
@@ -256,6 +315,12 @@ export interface Car {
   driftPhase: 'none' | 'hop' | 'locked';
   /** Which way the locked drift goes: −1 or +1. */
   driftDir: number;
+  /**
+   * The slip angle the stick is currently asking for, in radians. Rate limited,
+   * so it lags the stick — see V.driftAim. Lives on the car rather than in a
+   * local because it has to survive between substeps.
+   */
+  driftTarget: number;
   /** True while locked into a drift. */
   drifting: boolean;
   /** Previous frame's drift input, for edge detection inside the substeps. */
@@ -291,6 +356,7 @@ export function makeCar(): Car {
     steer: 0,
     offroad: false,
     driftPhase: 'none',
+    driftTarget: V.driftMid,
     driftDir: 0,
     drifting: false,
     driftWasHeld: false,
@@ -312,6 +378,7 @@ export function resetCar(car: Car, x: number, z: number, a: number): void {
   car.slipRatio.fill(0);
   car.steer = 0;
   car.driftPhase = 'none';
+  car.driftTarget = V.driftMid;
   car.driftDir = 0;
   car.drifting = false;
   car.driftWasHeld = false;
@@ -338,7 +405,7 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   const mu = V.mu * (off ? 0.66 : 1);
 
   /* ---- drift: hop in, counter-steer to hold ----
-     See the notes on V.hopSpeed and V.counterAuthority. The state machine is
+     See the notes on V.hopSpeed and V.driftTight. The state machine is
      here rather than in the caller because it has to see the suspension loads,
      which are what tell it the wheels have landed. */
   const planar = Math.hypot(car.vx, car.vz);
@@ -363,18 +430,45 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   const driftHeld = car.driftPhase === 'locked';
   car.drifting = driftHeld;
 
-  /* Counter-steer: positive when steering AGAINST the slide. This is what
-     holds the angle; without it the slip keeps growing to a spin. */
-  const counter = driftHeld ? clamp(-car.driftDir * str, 0, 1) : 0;
-  const into = driftHeld ? clamp(car.driftDir * str, 0, 1) : 0;
+  /* The stick, in the drift's own frame: +1 held INTO the drift, -1 against it.
+     In Mario Kart this does not push the kart round — it picks how far round
+     the drift sits. See the note on V.driftTight. */
+  const aim = driftHeld ? clamp(car.driftDir * str, -1, 1) : 0;
+
+  /* The slip a drift produces is opposite in sign to the steering that entered
+     it — measured, not assumed: driftDir +1 gives slip around -0.5 rad. */
+  const driftSign = -car.driftDir;
+
+  if (driftHeld) {
+    const taper = clamp(
+      (planar - V.driftMinSpeed) / (V.driftFullSpeed - V.driftMinSpeed),
+      V.driftMinAngle, 1);
+    const want = (aim >= 0
+      ? V.driftMid + aim * (V.driftTight - V.driftMid)
+      : V.driftMid + aim * (V.driftMid - V.driftWide)) * taper;
+    // Rate-limited, so slamming the stick is a lean rather than a step input.
+    // This is the progressiveness dial: everything downstream is a controller
+    // chasing THIS number, and it can only move so fast.
+    car.driftTarget += clamp(want - car.driftTarget, -V.driftAim * h, V.driftAim * h);
+  } else {
+    car.driftTarget = V.driftMid;
+  }
 
   const speed = car.vx * fx + car.vz * fz;
 
   /* Steering is RATE LIMITED rather than instantaneous — see the note on
      V.maxSteer. Coming back to centre is quicker than going out, so the truck
      settles after a corner rather than hunting about. */
-  const target = -str * V.maxSteer *
-    (1 - V.steerFalloff * Math.min(1, Math.abs(speed) / P.vMax));
+  /* One stick cannot do two jobs at full authority. While drifting it is
+     choosing a drift angle, so the front wheels get a third of their lock —
+     enough to place the nose, not enough to fight the drift controller — and
+     they always point somewhere into the corner. See V.driftSteerMin. */
+  const strFront = driftHeld
+    ? car.driftDir * (V.driftSteerMin + (1 - V.driftSteerMin) * (aim + 1) / 2)
+    : str;
+  const target = -strFront * V.maxSteer *
+    (1 - V.steerFalloff * Math.min(1, Math.abs(speed) / P.vMax)) *
+    (driftHeld ? V.driftSteer : 1);
   const turning = Math.abs(target) >= Math.abs(car.steer) &&
     Math.sign(target) === Math.sign(car.steer || target);
   const rate = feel(FEEL.rate) * (turning ? 1 : V.steerReturnBoost);
@@ -501,10 +595,28 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   tPitch += Ffwd * V.comH;
   tRoll += Flft * V.comH;
 
-  // The destabilising torque that makes a locked drift something you have to
-  // fly. See the note on V.driftYaw.
-  if (driftHeld) {
-    tYaw -= car.driftDir * V.driftYaw * clamp(planar / 14, 0, 1);
+  /* ---- the drift controller ----
+     A PD loop that flies the body to the slip angle the stick asked for. It
+     pushes the slide OUT when you are short of the target and gathers it back
+     IN when you are past, which is what makes the angle bounded and the drift
+     unloseable — the two things the old torque-versus-counter-steer fight got
+     wrong.
+
+     The derivative term needs how fast the slip angle is actually changing,
+     which is the body's yaw rate minus the velocity vector's. The latter falls
+     straight out of the force already accumulated this step:
+     d/dt atan2(vx, vz) = (vz*ax - vx*az) / |v|^2. Estimating it by remembering
+     last frame's slip instead would be a substep behind, and this runs three
+     times a frame. */
+  if (driftHeld && planar > 1) {
+    const omegaV = (car.vz * Fx - car.vx * Fz) / (V.mass * planar * planar);
+    const q = slipSigned * driftSign;                  // slip, in the drift's frame
+    const qRate = (car.yaw - omegaV) * driftSign;
+    const push = clamp(
+      V.driftHold * (car.driftTarget - q) - V.driftDamp * qRate,
+      -V.driftHoldMax, V.driftHoldMax
+    ) * clamp(planar / 12, 0, 1);
+    tYaw += driftSign * push;
   }
 
   // Gravity's component along the hillside — climbs cost speed, descents pay it back.
@@ -557,14 +669,12 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
     // Whichever end of the axis we are actually travelling along.
     const axis = Math.abs(toNose) > Math.PI / 2 ? car.a + Math.PI : car.a;
     const offA = Math.atan2(Math.sin(axis - vdir), Math.cos(axis - vdir));
-    /* Most of the assist switches off in a drift, so the back stays out. What
-       brings it back is COUNTER-STEER, not a timer: steer against the slide and
-       the truck gathers itself, steer further into it and it goes further. */
-    let rate = V.assist;
-    if (driftHeld) {
-      rate = V.assist * (V.driftAssist * (1 - into * (1 - V.driftInto)))
-        + counter * V.counterAuthority;
-    }
+    /* Most of the assist switches off in a drift, so the back stays out. It is
+       a constant now: it used to spike to counterAuthority the instant you
+       steered against the slide, which snapped the truck straight and was half
+       of what read as darting. Gathering the slide back in is the drift
+       controller's job, and it does it at a rate you can watch. */
+    const rate = driftHeld ? V.assist * V.driftAssist : V.assist;
     const na = vdir + offA * Math.min(1, rate * h);
     car.vx = Math.sin(na) * spd2;
     car.vz = Math.cos(na) * spd2;
@@ -583,10 +693,22 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
        Deriving it from the resulting slip instead inverts both of them, and the
        symptom is subtle: the drift still works, but it is being held by the
        "steering further in" branch while the code believes it is counter-steer. */
-    const want = Math.abs(str) > 0.15 ? Math.sign(str) : -Math.sign(car.yaw);
+    /* Landing with no input and no rotation is just a hop. It has to be, now
+       that the charge is time-based: without the yaw floor the truck locks into
+       a drift with no direction, the rear grip cut at full throttle produces
+       enough power oversteer to clear the "actually sideways" gate, and holding
+       the button down a straight farms a full boost in two seconds. */
+    const want = Math.abs(str) > 0.15 ? Math.sign(str)
+      : Math.abs(car.yaw) > V.driftHopYaw ? -Math.sign(car.yaw)
+      : 0;
     if (want !== 0 && planar > V.driftMinSpeed) {
       car.driftPhase = 'locked';
       car.driftDir = want;
+      /* Seed the target from the slip the truck ALREADY has, so the controller
+         starts with no error and grows into the angle at driftAim. Starting it
+         at the middle angle instead made the first tenth of a second a step
+         input, which is the snap the whole rework is trying to remove. */
+      car.driftTarget = Math.min(bodySlip, V.driftMid);
     } else {
       car.driftPhase = 'none';
     }
@@ -594,19 +716,25 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
 
   if (car.driftPhase === 'locked') {
     if (bodySlip > V.driftSpin) {
-      // Gone too far. The drift is lost and the charge with it — that is the
-      // cost of not catching it.
+      /* A safety valve rather than a mechanic. The controller keeps the angle
+         well inside this, so getting here means something hit you or the
+         ground did something unexpected — and losing the charge is then a
+         consequence of the crash rather than of the drift. */
       car.driftPhase = 'none';
       car.driftDir = 0;
       car.driftCharge = 0;
       car.spunOut = true;
+    } else if (planar < V.driftMinSpeed * V.driftDropSpeed) {
+      // Too slow to be a drift any more. Keep whatever was earned.
+      car.driftPhase = 'none';
+      car.driftDir = 0;
     } else {
-      /* Charge builds fastest in a sweet band of slip angle. Not sideways
-         enough earns nothing; on the edge of a spin earns nearly nothing
-         either, so the reward is for holding the angle rather than for
-         surviving the biggest slide you can provoke. */
+      /* Time-based, and faster with the stick hard over — Mario Kart's model.
+         The gate is just "actually sideways", which a wide drift on full
+         counter-steer still clears, so committing harder pays but playing it
+         safe still earns. */
       const q = bodySlip < V.driftSlip ? 0
-        : clamp(1 - Math.abs(bodySlip - V.driftSweet) / V.driftSweetWidth, 0, 1);
+        : (Math.abs(str) > V.driftHardStick ? V.driftHardRate : 1);
       car.driftCharge = Math.min(1, car.driftCharge + (h * q) / V.driftChargeTime);
     }
   } else if (car.driftCharge > 0) {

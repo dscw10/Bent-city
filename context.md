@@ -216,7 +216,7 @@ Working:
 - Title, pause, results, restart, settings, best scores — no refreshing to replay
 - Full synthesised audio: layered engine, tyre and surface noise, panned rivals,
   four-stem adaptive music
-- 118 headless tests over the rules, the physics, collision and the pass
+- 125 headless tests over the rules, the physics, collision and the pass
 
 Not built yet:
 - Any handling nuance beyond what is there — the truck is good, not finished
@@ -800,6 +800,101 @@ generator regardless, and the shared part is the graph underneath.
 `Level` in `game/levels.ts` is the shape a second place slots into — network,
 wrap size, off-road test, spawn, and a `build()` that makes the scenery. Only
 the city implements it so far.
+
+## Drifting, rebuilt on the Mario Kart model (30 Aug)
+
+Chris: *"for drifting it steers too sharply. It needs to be more progressive. Is
+there anything out there that describes the mechanics from Mario kart?"*
+
+### What the reference material actually says
+
+Three things are publicly documented and all three mattered:
+
+- **The stick chooses an ANGLE, not a torque.** Held into the turn you get a
+  tight drift; released, a middle one; held against it, a wide one. The kart
+  travels to that angle. **You cannot spin out of a drift**, and there is no
+  fight to lose.
+- **Charge is time-based**, a counter that runs while you are drifting — faster
+  (5 per frame rather than 2, hence the 2.5× here) when the stick is more than
+  45° over. Three tiers of boost come off that one counter.
+- **Inside vs outside drift** is a vehicle property, not a player choice. Ours
+  is an outside drifter, which is the kart behaviour.
+
+### What we had, measured
+
+Full throttle from 20 m/s, hop in, then hold the stick INTO the drift — which
+is the first thing anybody tries:
+
+```
+t=0.50  slip -0.15  yaw -1.95        20 m/s
+t=0.75  slip -0.53  yaw -2.21        19 m/s
+t=1.00  slip -0.96  yaw -2.35        12 m/s
+t=1.25  SPUN OUT                      8 m/s
+```
+
+135 degrees a second of yaw, spun inside 1.25 seconds, two thirds of the speed
+gone. That is what "steers too sharply" was, and it was not a tuning error — it
+was the model. A constant destabilising torque pushed the slide out and
+counter-steer authority pulled it back, so the stick was in a tug of war it
+could lose, and "steer further in" was the losing move.
+
+### The rework
+
+The target slip angle is now a lerp between three numbers, and a PD controller
+flies the body to it:
+
+| stick | target slip | turned in 2s | speed held | charge | speed 1.6s after |
+|---|---|---|---|---|---|
+| into | 0.58 rad (33°) | 109° | 11.5 | 1.00 | 24.0 |
+| released | 0.38 rad (22°) | 88° | 15.7 | 0.56 | 21.2 |
+| against | 0.18 rad (10°) | 46° | 22.9 | 0.23 | 23.2 |
+| *gripping, full lock* | — | *89°* | *19.3* | — | *23.0* |
+
+Read the last two columns together: a committed drift is slowest through the
+corner and fastest out of it. That is the arcade bargain, and it is now a real
+one — before, the tight option simply ended the run.
+
+**Progressiveness has two halves, and only one of them is the controller.**
+
+1. **The target itself is rate limited** to `driftAim` rad/s, so slamming the
+   stick is a lean rather than a step input. It is also SEEDED from the slip the
+   truck already has at the moment of lock — starting it at the middle angle
+   made the first tenth of a second a step input, which was most of the snap.
+2. **The front wheels give up two thirds of their lock while drifting.** One
+   stick cannot do two jobs at full authority. This is the other half of the fix
+   and it is the half that is easy to miss.
+
+Three things that came out of building it:
+
+- **The derivative term needs the slip angle's rate, not last frame's slip.**
+  `stepVehicle` runs three substeps a frame, so remembering the previous value
+  is always a substep stale. The exact answer falls out of the force already
+  accumulated: `d/dt atan2(vx,vz) = (vz·ax − vx·az)/|v|²`, and slip rate is the
+  body's yaw minus that.
+- **Counter-steer used to turn the truck the OTHER WAY.** The front axle can
+  make about 6800 N·m and the controller is clamped to a fifth of that, so at
+  full counter the stick simply won. In a kart game holding away from a drift
+  gives you a wide version of the same corner, never the opposite one — so
+  while drifting the stick no longer reaches the wheels directly, it slides
+  them between pointing hard into the corner and pointing slightly into it.
+- **The first version had a death spiral.** The controller held 33° of slip
+  whatever the speed, and at 33° the tyres scrub hard enough to take the truck
+  from 20 m/s to 6 and keep it there, rotating slowly. The target now tapers
+  with speed and the drift drops out below a floor.
+
+### And one exploit the new charge model created
+
+Time-based charge is more forgiving than the old sweet-band, but it opened a
+hole: hop with no steering input at all, and cutting the rear grip at full
+throttle produces enough power oversteer to clear the "actually sideways" gate.
+Holding the button down a straight farmed a full boost in two seconds. Landing
+with no input AND no rotation is now just a hop.
+
+### What was dropped, and why
+
+The old charge paid out fastest in a band around 32° of slip. It was precise,
+and it rewarded a skill the player had no instrument for — you cannot see your
+own slip angle. Committing to the corner is legible; holding 32° is not.
 
 ## The mountain pass (29 Aug)
 
@@ -1496,7 +1591,7 @@ caching, the phone performance pass and anything Steam-shaped are not.*
 ## Files
 
 - `src/` — the game. See the module map under "Current state" above.
-- `tests/` — 118 headless tests over the rules, the physics, collision and the pass.
+- `tests/` — 125 headless tests over the rules, the physics, collision and the pass.
 - `bent-city.html` — the original single-file prototype, kept as the historical
   record of where the bend came from. **It is no longer the game** and does not
   receive changes; open it to see what v0.7 looked like, not to play.

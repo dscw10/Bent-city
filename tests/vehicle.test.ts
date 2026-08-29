@@ -269,7 +269,7 @@ describe('steering feel', () => {
   });
 });
 
-describe('drift: hop in, counter-steer to hold', () => {
+describe('drift: hop in, then choose the angle', () => {
   const dt = 1 / 60;
   const slipOf = (c: ReturnType<typeof makeCar>) =>
     Math.atan2(Math.sin(c.a - Math.atan2(c.vx, c.vz)), Math.cos(c.a - Math.atan2(c.vx, c.vz)));
@@ -288,22 +288,24 @@ describe('drift: hop in, counter-steer to hold', () => {
     const car = makeCar();
     resetCar(car, nodePos(2), nodePos(2), 0);
     for (let i = 0; i < 60 * 3; i++) frame(car, 1, 0, false);
+    const entryV = car.v;
+    const entryA = car.a;
     let spun = false;
     let peakAir = 0;
+    let peakYaw = 0;
     for (let i = 0; i < Math.round(seconds / dt); i++) {
-      frame(car, 0.8, pilot(car, i * dt), drift);
+      frame(car, 0.9, pilot(car, i * dt), drift);
       peakAir = Math.max(peakAir, car.y - terrainAt(car.x, car.z) - V.comH);
+      peakYaw = Math.max(peakYaw, Math.abs(car.yaw));
       if (car.spunOut) { spun = true; break; }
     }
-    return { car, spun, peakAir };
+    const turned = Math.atan2(Math.sin(car.a - entryA), Math.cos(car.a - entryA));
+    return { car, spun, peakAir, peakYaw, entryV, turned };
   }
 
-  /** A competent driver: flick in, then chase the sweet angle. */
-  const goodPilot = (c: ReturnType<typeof makeCar>, t: number) => {
-    if (t < 0.35) return 1;
-    const err = Math.abs(slipOf(c)) - V.driftSweet;
-    return Math.max(-1, Math.min(1, -c.driftDir * err * 6));
-  };
+  /** Flick in, then hold the stick wherever the caller wants it. */
+  const held = (after: number) => (_c: ReturnType<typeof makeCar>, t: number) =>
+    t < 0.35 ? 1 : after;
 
   it('hops, and the wheels really leave the ground', () => {
     const r = fly(0.5, () => 1);
@@ -327,32 +329,105 @@ describe('drift: hop in, counter-steer to hold', () => {
     expect(car.driftCharge).toBe(0);
   });
 
-  it('spins out if you do not catch it', () => {
-    // The whole point of counter-steer being required.
-    const r = fly(4, (_c, t) => (t < 0.35 ? 1 : 0));
-    expect(r.spun).toBe(true);
-    expect(r.car.driftCharge).toBe(0);             // and the charge goes with it
-    expect(r.car.driftPhase).toBe('none');
+  /**
+   * The heart of the Mario Kart model: the stick is not a torque, it is a
+   * CHOICE OF ANGLE within a bounded range. Three settings, three drifts, and
+   * the ordering is the whole mechanic.
+   */
+  it('gives a tighter drift the harder you hold into it', () => {
+    const into = fly(2.0, held(1));
+    const mid = fly(2.0, held(0));
+    const wide = fly(2.0, held(-1));
+
+    const s = (r: { car: ReturnType<typeof makeCar> }) => Math.abs(slipOf(r.car));
+    expect(s(into)).toBeGreaterThan(s(mid));
+    expect(s(mid)).toBeGreaterThan(s(wide));
+
+    // And each one is near the angle it asked for, not somewhere it drifted to.
+    expect(s(into)).toBeGreaterThan(V.driftTight * 0.7);
+    expect(s(wide)).toBeLessThan(V.driftMid);
   });
 
-  it('holds a steady angle when it is caught, and charges', () => {
-    const r = fly(3.2, goodPilot);
+  it('turns the same way whatever the stick does — counter is wider, not opposite', () => {
+    /* The bug this pins: at full counter the front axle used to out-torque the
+       drift controller and steer the truck the other way round. In a kart game
+       holding away from a drift gives you a WIDE version of that corner, never
+       the opposite corner. */
+    const into = fly(2.0, held(1));
+    const wide = fly(2.0, held(-1));
+    expect(Math.sign(wide.turned)).toBe(Math.sign(into.turned));
+    expect(Math.abs(wide.turned)).toBeLessThan(Math.abs(into.turned));
+    expect(Math.abs(wide.turned)).toBeGreaterThan(0.4);   // still a real corner
+  });
+
+  it('does not spin out just because you stopped steering', () => {
+    /* This is the behaviour that deliberately changed. It used to be the point
+       — a constant destabilising torque meant doing nothing walked you into a
+       spin. Measured from 20 m/s that reached 135 deg/s of yaw and spun inside
+       1.25 seconds, dumping the truck to 8 m/s. That is what "steers too
+       sharply" was. */
+    const r = fly(4, held(0));
     expect(r.spun).toBe(false);
-    expect(Math.abs(slipOf(r.car))).toBeGreaterThan(0.35);
-    expect(Math.abs(slipOf(r.car))).toBeLessThan(V.driftSpin);
-    expect(r.car.driftCharge).toBeGreaterThan(0.8);
+    expect(r.car.driftCharge).toBeGreaterThan(0.5);
   });
 
-  it('earns nothing for over-correcting the slide flat', () => {
-    // Too much counter-steer kills the angle, and a truck going straight is
-    // not drifting however hard the button is held.
-    const r = fly(3.5, (_c, t) => (t < 0.35 ? 1 : -0.6));
-    expect(Math.abs(slipOf(r.car))).toBeLessThan(V.driftSlip);
-    expect(r.car.driftCharge).toBeLessThan(0.15);
+  it('keeps the angle bounded even at full commitment', () => {
+    const r = fly(4, held(1));
+    expect(r.spun).toBe(false);
+    expect(Math.abs(slipOf(r.car))).toBeLessThan(V.driftSpin);
+    expect(r.peakYaw).toBeLessThan(2.0);
+  });
+
+  it('is progressive: slamming the stick over is not a step input', () => {
+    /* The target may only travel at driftAim rad/s, so a stick slammed from
+       full counter to full into cannot move the truck instantly. Sampled the
+       frame after the slam it must be part-way, not arrived. */
+    const r = fly(1.6, held(-1));
+    const before = r.car.driftTarget;
+    frame(r.car, 0.9, 1, true);
+    const after = r.car.driftTarget;
+    expect(after).toBeGreaterThan(before);
+    expect(after - before).toBeLessThanOrEqual(V.driftAim * dt + 1e-9);
+    expect(after).toBeLessThan(V.driftTight * 0.6);       // nowhere near arrived
+  });
+
+  it('steers the front wheels far less than gripping does', () => {
+    // The other half of the fix for the darting: one stick cannot do two jobs
+    // at full authority, so the road wheels give up most of their lock.
+    const drifting = fly(1.5, held(1));
+    const gripping = fly(1.5, () => 1, false);
+    expect(Math.abs(drifting.car.steer)).toBeLessThan(Math.abs(gripping.car.steer) * 0.6);
+  });
+
+  it('pays for commitment: harder drift, faster charge', () => {
+    const into = fly(1.6, held(1));
+    const mid = fly(1.6, held(0));
+    expect(into.car.driftCharge).toBeGreaterThan(mid.car.driftCharge * 1.5);
+  });
+
+  it('earns nothing from a truck that is not actually sideways', () => {
+    // Holding the button down a straight is not a drift. Steering nothing at
+    // all never locks in, so there is no charge to farm.
+    const r = fly(3, () => 0);
+    expect(r.car.driftCharge).toBe(0);
+  });
+
+  it('drops the drift rather than becoming a slow pirouette', () => {
+    // A big slip angle at walking pace is free rotation, not a drift. The
+    // target tapers with speed and the drift ends outright below a floor.
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    for (let i = 0; i < 60 * 3; i++) frame(car, 1, 0, false);
+    for (let i = 0; i < 60 * 2; i++) frame(car, 0.9, 1, true);
+    expect(car.driftPhase).toBe('locked');
+    // Now take the power away and let the speed wash off.
+    for (let i = 0; i < 60 * 8; i++) frame(car, -0.2, 1, true);
+    expect(car.driftPhase).toBe('none');
+    expect(Math.abs(car.v)).toBeLessThan(V.driftMinSpeed);
   });
 
   it('cashes the charge in on release, once', () => {
-    const r = fly(3.2, goodPilot);
+    const r = fly(2.0, held(1));
     const charge = r.car.driftCharge;
     expect(charge).toBeGreaterThan(V.driftMinCharge);
 
@@ -363,6 +438,23 @@ describe('drift: hop in, counter-steer to hold', () => {
 
     frame(r.car, 0.8, 0, false);
     expect(r.car.boostFired).toBe(0);              // and not again
+  });
+
+  it('is worth doing: a committed drift turns tighter and leaves faster', () => {
+    /* The arcade bargain, and the reason any of this exists. A full drift
+       costs a lot of speed through the corner and hands it back as a boost, so
+       it has to come out level with or ahead of simply gripping round —
+       otherwise the button is decoration. */
+    const drift = fly(2.0, held(1));
+    const grip = fly(2.0, () => 1, false);
+    expect(Math.abs(drift.turned)).toBeGreaterThan(Math.abs(grip.turned));
+    expect(drift.car.v).toBeLessThan(grip.car.v);           // slower mid-corner
+
+    // Now let both run on, so the drift can cash its boost.
+    for (const r of [drift, grip]) {
+      for (let i = 0; i < 60 * 1.6; i++) frame(r.car, 1, 0, false);
+    }
+    expect(drift.car.v).toBeGreaterThan(grip.car.v * 0.98);
   });
 
   it('pays nothing for a stab of the button', () => {
