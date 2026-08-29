@@ -12,7 +12,7 @@ import { Screens } from './ui/screens';
 import type { ResultRow } from './ui/screens';
 import { Game } from './game/game';
 import type { Mode } from './game/modes';
-import { nodePos } from './core/city-layout';
+import { cityLevel } from './game/levels';
 import { save, applySavedBend, captureBend, persist } from './game/storage';
 import { P } from './core/config';
 import { uniforms } from './render/uniforms';
@@ -25,7 +25,8 @@ import { GameAudio } from './audio';
 
 applySavedBend();
 
-const world = new World(document.getElementById('stage')!);
+const level = cityLevel();
+const world = new World(document.getElementById('stage')!, level);
 const projection = new Projection();
 const car = makeCar();
 const carMesh = buildCar(world.scene);
@@ -33,12 +34,12 @@ const hud = new Hud();
 const game = new Game();
 const audio = new GameAudio();
 
-game.bind(world.city.blocks);
+game.bind(level, world.city.blocks);
 projection.intensity = save.settings.bendIntensity;
 
-/** Where a shift begins: central, and not on top of a bakery. */
-const START_X = nodePos(4);
-const START_Z = nodePos(4);
+/** Where a shift begins. The level decides. */
+const START_X = level.spawn.x;
+const START_Z = level.spawn.z;
 
 const touch = createTouchControls(document.getElementById('touch')!);
 const keyboard = createKeyboard();
@@ -97,7 +98,7 @@ function setPlayingChrome(on: boolean): void {
 function startRun(mode: Mode): void {
   // The Start button is the user gesture the AudioContext has been waiting for.
   audio.begin(save.settings.volume, save.settings.muted);
-  resetCar(car, START_X, START_Z, 0);
+  resetCar(car, START_X, START_Z, level.spawn.heading);
   projection.reset(car.a);
   world.chase.reset();
   world.smoke.clear();
@@ -368,7 +369,7 @@ for (const ev of ['pointerdown', 'touchend', 'keydown'] as const) {
 // ---------- go ----------
 addEventListener('resize', () => world.resize());
 world.resize();
-resetCar(car, START_X, START_Z, 0);
+resetCar(car, START_X, START_Z, level.spawn.heading);
 projection.reset(car.a);
 carMesh.setCargo(0);
 applySettings();

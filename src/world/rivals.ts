@@ -1,6 +1,6 @@
-import { bfs, nearestNode, pathLength } from './graph';
-import type { Point } from './graph';
-import { nodePos, wrapDelta, wrapDist, GRID, TILE } from '../core/city-layout';
+import { RoadNetwork } from './network';
+import type { Point } from './network';
+import { wrapDelta, wrapDist, TILE } from '../core/city-layout';
 import { approachAngle } from '../core/math';
 import type { Dispatch, Order } from '../game/dispatch';
 
@@ -43,17 +43,22 @@ const BASE_SPEED = 15.5;
 export class Rivals {
   readonly list: Rival[] = [];
   private dispatch!: Dispatch;
+  private net!: RoadNetwork;
 
-  start(dispatch: Dispatch, count: number): void {
+  start(dispatch: Dispatch, net: RoadNetwork, count: number): void {
     this.dispatch = dispatch;
+    this.net = net;
     this.list.length = 0;
+    const total = net.nodes.length;
     for (let i = 0; i < count; i++) {
-      // Spread them around the tile so they don't all arrive from one direction.
-      const n = [(i * 3 + 2) % GRID, (i * 5 + 4) % GRID];
+      // Spread them around the network so they don't all arrive from one
+      // direction. Striding by a number coprime-ish with the node count keeps
+      // them apart on any shape of network.
+      const [sx, sz] = net.position(Math.floor((i * (total / count + 1)) % total));
       this.list.push({
         index: i,
-        x: nodePos(n[0]),
-        z: nodePos(n[1]),
+        x: sx,
+        z: sz,
         heading: 0,
         speed: BASE_SPEED,
         targetId: -1,
@@ -118,9 +123,10 @@ export class Rivals {
 
     for (const o of this.dispatch.orders) {
       if (taken.has(o.id)) continue;
-      const path = bfs(nearestNode(r.x, r.z), o.node, this.dispatch.closedEdges);
-      if (path.length === 0) continue;
-      const cost = pathLength(path);
+      const route = this.net.path(this.net.nearest(r.x, r.z), o.node, this.dispatch.closedEdges);
+      if (route.length === 0) continue;
+      const path = this.net.points(route);
+      const cost = this.net.length(route);
       // Don't bother with an order that will expire before they arrive.
       if (o.life > 0 && cost / r.speed > o.remaining) continue;
       if (cost < bestCost) { bestCost = cost; best = o; bestPath = path; }
@@ -133,9 +139,10 @@ export class Rivals {
     } else {
       // Nothing worth chasing — wander, so they still read as part of the city
       // rather than freezing in place.
-      const n: [number, number] = [(Math.random() * GRID) | 0, (Math.random() * GRID) | 0];
+      const anywhere = (Math.random() * this.net.nodes.length) | 0;
       r.targetId = -1;
-      r.path = bfs(nearestNode(r.x, r.z), n, this.dispatch.closedEdges);
+      r.path = this.net.points(
+        this.net.path(this.net.nearest(r.x, r.z), anywhere, this.dispatch.closedEdges));
       r.leg = 0;
     }
   }

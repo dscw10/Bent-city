@@ -1,7 +1,7 @@
 import type { Builder } from './builder';
 import type { RGB } from '../core/palette';
 import { C } from '../core/palette';
-import type { Point } from '../world/graph';
+import type { Point } from '../world/network';
 
 /**
  * Marks drawn onto the world: the route, objectives, rivals, closures.

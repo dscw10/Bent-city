@@ -1,6 +1,5 @@
-import { GRID, nodePos, wrapDist } from '../core/city-layout';
-import { edgeKey, gridDistance, nearestNode, nodeKey } from '../world/graph';
-import type { Node } from '../world/graph';
+import { wrapDist } from '../core/city-layout';
+import { RoadNetwork, edgeKey } from '../world/network';
 import type { Block } from '../render/city';
 import type { Mode } from './modes';
 
@@ -12,31 +11,34 @@ import type { Mode } from './modes';
  * PERSPECTIVE REGION?
  *
  * Roof tone encoding building height was a start, but it is scenery. The answer
- * has to be a DECISION the player can only make from above. There are three
- * here, and they compound:
+ * has to be a DECISION only the map can support, so there are three here, and
+ * they compound:
  *
  * 1. SIMULTANEOUS ORDERS. Several drops are live at once, each with its own
- *    countdown. At street level you can see the one you are pointed at. From
- *    the map you can see all of them, with their timers, and choose an order to
- *    serve them in. Choosing well is the game.
+ *    countdown. At street level you see the one you are pointed at; from the map
+ *    you see all of them and choose an order to serve them in.
  *
- * 2. A CAPACITY LIMIT. The truck holds three crates and refills at a bakery, so
- *    you cannot simply chase whatever is nearest — you have to pick a CLUSTER
- *    of three that a single loop can serve, and then get back. That is a
- *    routing problem with a shape, and the shape is only visible from above.
+ * 2. A CAPACITY LIMIT. Three crates, refilled at a bakery, so you cannot simply
+ *    chase whatever is nearest — you have to pick a CLUSTER one loop can serve
+ *    and then get back. That is a routing problem with a shape, and the shape is
+ *    only visible from above.
  *
- * 3. CLOSURES. Roadworks block edges of the graph. A closure two blocks ahead
- *    is invisible from the street and obvious from the map, and it changes
+ * 3. CLOSURES. Roadworks block segments of the network. A closure two blocks
+ *    ahead is invisible from the street and obvious from the map, and it changes
  *    which way you should already be turning. Because block interiors are
- *    drivable, a closure does not stop you — it pushes you onto the slow
- *    pavement cut-through, which is a cost rather than a wall.
+ *    drivable, it diverts you onto the slow pavement rather than stopping you.
  *
  * Rivals are the fourth, and they live in world/rivals.ts.
+ *
+ * NOTHING HERE KNOWS THE CITY IS A GRID. Everything addresses junctions by
+ * index into the level's RoadNetwork, which is what lets a differently-shaped
+ * place reuse all of it.
  */
 
 export interface Order {
   id: number;
-  node: Node;
+  /** Index into the level's road network. */
+  node: number;
   x: number;
   z: number;
   /** Total lifetime in seconds. 0 means it never expires (free roam). */
@@ -51,8 +53,8 @@ export interface Order {
 }
 
 export interface Closure {
-  a: Node;
-  b: Node;
+  a: number;
+  b: number;
   x: number;
   z: number;
   /** True if the barrier runs along the x axis (blocking a north-south road). */
@@ -68,12 +70,15 @@ export type DispatchEvent =
 
 export const CAPACITY = 3;
 
-/** Bakeries are fixed for a run and spread out, so one is never far away. */
-const BAKERY_NODES: Node[] = [[1, 1], [7, 3], [3, 7]];
+/** How many bakeries a level gets. Spread out, so one is never far away. */
+const BAKERY_COUNT = 3;
+/** A drop must be at least this far from the truck, in metres. */
+const MIN_DROP_RANGE = 200;
 
 export class Dispatch {
   readonly orders: Order[] = [];
-  readonly bakeries: Node[] = BAKERY_NODES.map(n => [...n] as Node);
+  /** Network node indices. */
+  readonly bakeries: number[] = [];
   readonly closures: Closure[] = [];
   /** Edge keys the router must avoid. Rivals honour these too. */
   readonly closedEdges = new Set<string>();
@@ -85,24 +90,51 @@ export class Dispatch {
   private spawnTimer = 0;
   private closureTimer = 0;
   private mode!: Mode;
+  private net!: RoadNetwork;
   /** 1 at the start of a run, growing with `mode.ramp`. Shortens order life. */
   private pressure = 1;
 
-  start(mode: Mode): void {
+  start(mode: Mode, net: RoadNetwork, spawnX: number, spawnZ: number): void {
     this.mode = mode;
+    this.net = net;
     this.orders.length = 0;
     this.crates = CAPACITY;
     this.nextId = 1;
     this.spawnTimer = 0;
     this.closureTimer = 0;
     this.pressure = 1;
+
+    this.placeBakeries();
     this.rollClosures(mode.closures);
 
-    // Seed the board. Starting empty means the first few seconds of a shift
-    // have nothing to read and nowhere to go, which is the worst possible
-    // introduction to a game whose whole pitch is choosing between drops.
+    /* Seed the board. Starting empty means the first few seconds of a shift
+       have nothing to read and nowhere to go, which is the worst possible
+       introduction to a game whose whole pitch is choosing between drops. */
     for (let i = 0; i < Math.min(2, mode.maxOrders); i++) {
-      this.spawnOrder(nodePos(4), nodePos(4));
+      this.spawnOrder(spawnX, spawnZ);
+    }
+  }
+
+  /**
+   * Spread the bakeries out by repeatedly taking the junction furthest from
+   * every bakery placed so far. Works on any network shape — on a lattice it
+   * lands them near the corners, on a pass it strings them along its length.
+   */
+  private placeBakeries(): void {
+    this.bakeries.length = 0;
+    const n = this.net.nodes.length;
+    if (n === 0) return;
+    this.bakeries.push(0);
+    while (this.bakeries.length < Math.min(BAKERY_COUNT, n)) {
+      let best = -1, bestD = -1;
+      for (let i = 0; i < n; i++) {
+        if (this.bakeries.includes(i)) continue;
+        let nearest = Infinity;
+        for (const b of this.bakeries) nearest = Math.min(nearest, this.net.distance(i, b));
+        if (nearest > bestD) { bestD = nearest; best = i; }
+      }
+      if (best < 0) break;
+      this.bakeries.push(best);
     }
   }
 
@@ -117,7 +149,8 @@ export class Dispatch {
     // --- restock ---
     if (this.crates < CAPACITY) {
       for (const b of this.bakeries) {
-        if (wrapDist(nodePos(b[0]), nodePos(b[1]), carX, carZ) < 11) {
+        const [bx, bz] = this.net.position(b);
+        if (wrapDist(bx, bz, carX, carZ) < 11) {
           this.crates = CAPACITY;
           events.push({ kind: 'restock', crates: this.crates });
           break;
@@ -183,11 +216,7 @@ export class Dispatch {
     return this.orders.find(o => o.id === id);
   }
 
-  /**
-   * The order the HUD calls "next": the nearest one you can actually serve. If
-   * the truck is empty that is a bakery instead, which is why this can return
-   * null and the caller has to handle the restock case.
-   */
+  /** The nearest order you could actually serve. */
   nearestOrder(x: number, z: number): Order | null {
     let best: Order | null = null;
     let bestD = Infinity;
@@ -198,46 +227,54 @@ export class Dispatch {
     return best;
   }
 
-  nearestBakery(x: number, z: number): Node {
-    let best = this.bakeries[0];
+  /** Network index of the nearest bakery. */
+  nearestBakery(x: number, z: number): number {
+    let best = this.bakeries[0] ?? 0;
     let bestD = Infinity;
     for (const b of this.bakeries) {
-      const d = wrapDist(nodePos(b[0]), nodePos(b[1]), x, z);
+      const d = this.net.distanceTo(b, x, z);
       if (d < bestD) { bestD = d; best = b; }
     }
     return best;
   }
 
-  private spawnOrder(carX: number, carZ: number): Order | null {
-    const here = nearestNode(carX, carZ);
-    let node: Node | null = null;
+  bakeryPosition(node: number): [number, number] {
+    return this.net.position(node);
+  }
 
-    // Drops must be far enough away that the plan region has to earn its place.
-    // At short range you can navigate from the street view alone, which rather
-    // defeats the point of the whole projection.
+  private spawnOrder(carX: number, carZ: number): Order | null {
+    let node = -1;
+
+    /* Drops must be far enough away that the plan region has to earn its place.
+       At short range you can navigate from the street view alone, which rather
+       defeats the point of the whole projection. Measured in METRES rather than
+       in grid steps, so it means the same thing on any network. */
     for (let tries = 0; tries < 80; tries++) {
-      const cand: Node = [(Math.random() * GRID) | 0, (Math.random() * GRID) | 0];
-      if (gridDistance(cand, here) < 4) continue;
-      if (this.orders.some(o => o.node[0] === cand[0] && o.node[1] === cand[1])) continue;
-      if (this.bakeries.some(b => b[0] === cand[0] && b[1] === cand[1])) continue;
+      const cand = (Math.random() * this.net.nodes.length) | 0;
+      if (this.net.distanceTo(cand, carX, carZ) < MIN_DROP_RANGE) continue;
+      if (this.orders.some(o => o.node === cand)) continue;
+      if (this.bakeries.includes(cand)) continue;
       node = cand;
       break;
     }
-    if (!node) return null;
+    if (node < 0) return null;
 
-    const bakery = this.nearestBakery(nodePos(node[0]), nodePos(node[1]));
-    const haul = gridDistance(node, bakery);
+    const [x, z] = this.net.position(node);
+    const bakery = this.nearestBakery(x, z);
+    const haul = this.net.length(this.net.path(node, bakery, this.closedEdges));
     const [lo, hi] = this.mode.orderLife;
     const life = lo > 0 ? (lo + Math.random() * (hi - lo)) / this.pressure : 0;
 
     const order: Order = {
       id: this.nextId++,
       node,
-      x: nodePos(node[0]),
-      z: nodePos(node[1]),
+      x,
+      z,
       life,
       remaining: life,
-      value: Math.round(50 + haul * 14),
+      // Paid by the length of the haul, so a long one across the map is worth
+      // committing to rather than something to avoid.
+      value: Math.round(50 + haul * 0.24),
       hot: Math.random() < 0.16,
       claimedBy: -1
     };
@@ -246,7 +283,7 @@ export class Dispatch {
   }
 
   /**
-   * Pick `n` road segments to close, then verify the graph is still fully
+   * Pick `n` segments to close, then verify the network is still fully
    * connected before accepting them. An unreachable drop is not a difficulty
    * spike, it is a bug the player experiences as unfairness.
    */
@@ -256,25 +293,27 @@ export class Dispatch {
     this.barriers.length = 0;
     if (n <= 0) return;
 
-    for (let attempt = 0; attempt < 40 && this.closures.length < n; attempt++) {
-      const i = (Math.random() * GRID) | 0;
-      const j = (Math.random() * GRID) | 0;
-      const horizontal = Math.random() < 0.5;
-      const a: Node = [i, j];
-      const b: Node = horizontal ? [i + 1, j] : [i, j + 1];
-      if (b[0] >= GRID || b[1] >= GRID) continue;
+    const edges = this.net.edges();
+    if (edges.length === 0) return;
 
+    for (let attempt = 0; attempt < 60 && this.closures.length < n; attempt++) {
+      const [a, b] = edges[(Math.random() * edges.length) | 0];
       const key = edgeKey(a, b);
       if (this.closedEdges.has(key)) continue;
 
       this.closedEdges.add(key);
-      if (!this.fullyConnected()) { this.closedEdges.delete(key); continue; }
+      if (!this.net.connected(this.closedEdges)) { this.closedEdges.delete(key); continue; }
 
+      const [ax, az] = this.net.position(a);
+      const [bx, bz] = this.net.position(b);
+      // Which way the barrier lies follows the segment it blocks, whatever
+      // angle that happens to be.
+      const alongX = Math.abs(this.net.delta(bx, ax)) < Math.abs(this.net.delta(bz, az));
       this.closures.push({
         a, b,
-        x: (nodePos(a[0]) + nodePos(b[0])) / 2,
-        z: (nodePos(a[1]) + nodePos(b[1])) / 2,
-        alongX: !horizontal
+        x: ax + this.net.delta(bx, ax) / 2,
+        z: az + this.net.delta(bz, az) / 2,
+        alongX
       });
     }
 
@@ -285,27 +324,5 @@ export class Dispatch {
         ? { x: c.x, z: c.z, w: 15, d: 2.2 }
         : { x: c.x, z: c.z, w: 2.2, d: 15 });
     }
-  }
-
-  /** Can node (0,0) still reach every other node? One flood fill, not 81 searches. */
-  private fullyConnected(): boolean {
-    const seen = new Uint8Array(GRID * GRID);
-    const stack: Node[] = [[0, 0]];
-    seen[0] = 1;
-    let reached = 1;
-    while (stack.length) {
-      const [i, j] = stack.pop()!;
-      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Node[]) {
-        const ni = i + di, nj = j + dj;
-        if (ni < 0 || nj < 0 || ni >= GRID || nj >= GRID) continue;
-        const k = nodeKey(ni, nj);
-        if (seen[k]) continue;
-        if (this.closedEdges.has(edgeKey([i, j], [ni, nj]))) continue;
-        seen[k] = 1;
-        reached++;
-        stack.push([ni, nj]);
-      }
-    }
-    return reached === GRID * GRID;
   }
 }

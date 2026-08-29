@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Dispatch, CAPACITY } from '../src/game/dispatch';
 import { Rivals } from '../src/world/rivals';
 import { findMode, MODES } from '../src/game/modes';
-import { bfs, edgeKey, nearestNode, unwrapPath, pathLength } from '../src/world/graph';
+import { RoadNetwork, edgeKey } from '../src/world/network';
+import { buildGridNetwork } from '../src/world/networks/grid';
 import { GRID, TILE, nodePos, wrapDelta, wrapDist, nearCopy, onOffroad, PITCH, ROADW } from '../src/core/city-layout';
 import { terrainAt } from '../src/core/terrain';
 
@@ -49,49 +50,92 @@ describe('surfaces', () => {
   });
 });
 
-describe('routing', () => {
-  it('finds a path and reports its length', () => {
-    const path = bfs([0, 0], [3, 4]);
-    expect(path.length).toBe(8);                       // 3 + 4 steps, plus the start
-    expect(pathLength(path)).toBeCloseTo(7 * PITCH, 6);
+describe('the road network', () => {
+  const net = buildGridNetwork();
+  const at = (i: number, j: number) => net.nearest(nodePos(i), nodePos(j));
+
+  it('links every junction to its neighbours, symmetrically', () => {
+    expect(net.nodes.length).toBe(GRID * GRID);
+    for (let i = 0; i < net.nodes.length; i++) {
+      for (const j of net.nodes[i].links) {
+        expect(net.nodes[j].links).toContain(i);   // never a one-way street
+      }
+    }
   });
 
-  it('routes around a closed edge instead of through it', () => {
-    const closed = new Set([edgeKey([0, 0], [1, 0])]);
-    const path = bfs([0, 0], [1, 0], closed);
-    expect(path.length).toBeGreaterThan(2);            // forced the long way round
-    expect(pathLength(path)).toBeCloseTo(3 * PITCH, 6);
+  it('finds a route and reports its length in metres', () => {
+    const route = net.path(at(0, 0), at(3, 4));
+    expect(route.length).toBe(8);                  // 3 + 4 steps, plus the start
+    expect(net.length(route)).toBeCloseTo(7 * PITCH, 6);
   });
 
-  it('returns nothing rather than a wrong path when the target is walled off', () => {
+  it('routes by real distance, not by hop count', () => {
+    /* The whole reason this is Dijkstra rather than BFS. On a lattice the two
+       agree; on a pass, where one link can be ten times another, hop-counting
+       sends you the scenic way round. */
+    const nodes = [
+      { x: 0, z: 0, links: [1, 2] },        // 0 -> 1 is one enormous hop
+      { x: 900, z: 0, links: [0, 3] },
+      { x: 0, z: 10, links: [0, 3] },       // 0 -> 2 -> 3 is two short ones
+      { x: 10, z: 10, links: [2, 1] }
+    ];
+    const pass = new RoadNetwork(nodes, 0);
+    expect(pass.path(0, 3)).toEqual([0, 2, 3]);
+  });
+
+  it('routes around a closed segment instead of through it', () => {
+    const closed = new Set([edgeKey(at(0, 0), at(1, 0))]);
+    const route = net.path(at(0, 0), at(1, 0), closed);
+    expect(route.length).toBeGreaterThan(2);       // forced the long way round
+    expect(net.length(route)).toBeCloseTo(3 * PITCH, 6);
+  });
+
+  it('returns nothing rather than a wrong route when the target is walled off', () => {
     const closed = new Set([
-      edgeKey([0, 0], [1, 0]),
-      edgeKey([0, 0], [0, 1])
+      edgeKey(at(0, 0), at(1, 0)),
+      edgeKey(at(0, 0), at(0, 1))
     ]);
-    expect(bfs([0, 0], [4, 4], closed)).toEqual([]);
+    expect(net.path(at(0, 0), at(4, 4), closed)).toEqual([]);
+    expect(net.connected(closed)).toBe(false);
   });
 
-  it('unwraps a path sequentially so a long route cannot fold back on itself', () => {
-    // A route longer than half a tile: unwrapping every point against a single
-    // origin would fold the far end back, so this must be done step by step.
-    const path = bfs([0, 0], [8, 0]);
-    const out = unwrapPath(path, 0, 0);
+  it('unwraps a route sequentially so a long one cannot fold back on itself', () => {
+    // Longer than half a tile: unwrapping every point against a single origin
+    // would fold the far end back.
+    const points = net.points(net.path(at(0, 0), at(8, 0)));
+    const out = net.unwrap(points, 0, 0);
     for (let i = 1; i < out.length; i++) {
       expect(Math.abs(out[i][0] - out[i - 1][0])).toBeLessThanOrEqual(PITCH + 1e-6);
     }
     expect(out[out.length - 1][0]).toBeCloseTo(8 * PITCH, 6);
   });
 
-  it('snaps a position to the intersection nearest it', () => {
-    expect(nearestNode(nodePos(3) + 4, nodePos(5) - 4)).toEqual([3, 5]);
+  it('leaves a non-wrapping network alone when unwrapping', () => {
+    const pass = new RoadNetwork([{ x: 0, z: 0, links: [] }], 0);
+    const pts: Array<[number, number]> = [[0, 0], [500, 0]];
+    expect(pass.unwrap(pts, 0, 0)).toEqual(pts);
+  });
+
+  it('snaps a position to the junction nearest it', () => {
+    expect(net.nearest(nodePos(3) + 4, nodePos(5) - 4)).toBe(at(3, 5));
+  });
+
+  it('finds a nearest junction from anywhere, even far off the network', () => {
+    for (const [x, z] of [[-4000, -4000], [1e5, 0], [261, 261], [0, 0]]) {
+      const i = net.nearest(x, z);
+      expect(i).toBeGreaterThanOrEqual(0);
+      expect(i).toBeLessThan(net.nodes.length);
+    }
   });
 });
 
 describe('dispatch', () => {
+  const net = buildGridNetwork();
+  const home = { x: nodePos(4), z: nodePos(4) };
   let d: Dispatch;
   beforeEach(() => {
     d = new Dispatch();
-    d.start(findMode('shift'));
+    d.start(findMode('shift'), net, home.x, home.z);
   });
 
   it('starts loaded and empties one crate per delivery', () => {
@@ -110,13 +154,13 @@ describe('dispatch', () => {
     d.update(0.016, o.x, o.z);
     expect(d.crates).toBe(CAPACITY - 1);
 
-    const b = d.bakeries[0];
-    const ev = d.update(0.016, nodePos(b[0]), nodePos(b[1]));
+    const [bx, bz] = d.bakeryPosition(d.bakeries[0]);
+    const ev = d.update(0.016, bx, bz);
     expect(ev.some(e => e.kind === 'restock')).toBe(true);
     expect(d.crates).toBe(CAPACITY);
 
     // Sitting on the bakery already full must not fire again.
-    const again = d.update(0.016, nodePos(b[0]), nodePos(b[1]));
+    const again = d.update(0.016, bx, bz);
     expect(again.some(e => e.kind === 'restock')).toBe(false);
   });
 
@@ -146,28 +190,24 @@ describe('dispatch', () => {
     expect(d.orders.length).toBeLessThanOrEqual(mode.maxOrders);
   });
 
-  it('leaves the graph fully connected after closing roads', () => {
+  it('leaves the network fully connected after closing roads', () => {
     // An unreachable drop is not difficulty, it is unfairness.
     for (let attempt = 0; attempt < 25; attempt++) {
       const fresh = new Dispatch();
-      fresh.start(findMode('rush'));
-      for (let i = 0; i < GRID; i++) {
-        for (let j = 0; j < GRID; j++) {
-          expect(bfs([0, 0], [i, j], fresh.closedEdges).length).toBeGreaterThan(0);
-        }
-      }
+      fresh.start(findMode('rush'), net, home.x, home.z);
+      expect(net.connected(fresh.closedEdges)).toBe(true);
     }
   });
 
   it('gives every closure a barrier to drive into', () => {
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, home.x, home.z);
     expect(d.barriers.length).toBe(d.closures.length);
     for (const b of d.barriers) expect(b.w * b.d).toBeGreaterThan(0);
   });
 
   it('has no clock, no rivals and no expiry in free roam', () => {
     const roam = new Dispatch();
-    roam.start(findMode('roam'));
+    roam.start(findMode('roam'), net, home.x, home.z);
     for (let i = 0; i < 200; i++) roam.update(1, nodePos(0), nodePos(0));
     expect(roam.closures.length).toBe(0);
     expect(roam.orders.length).toBeGreaterThan(0);
@@ -176,13 +216,14 @@ describe('dispatch', () => {
 });
 
 describe('rivals', () => {
+  const net = buildGridNetwork();
   it('converge on an order and take it', () => {
     const d = new Dispatch();
-    d.start(findMode('shift'));
+    d.start(findMode('shift'), net, nodePos(0), nodePos(0));
     while (d.orders.length === 0) d.update(1, nodePos(0), nodePos(0));
 
     const r = new Rivals();
-    r.start(d, 2);
+    r.start(d, net, 2);
 
     let sniped: number[] = [];
     for (let i = 0; i < 4000 && sniped.length === 0; i++) {
@@ -194,9 +235,9 @@ describe('rivals', () => {
 
   it('stay inside the tile', () => {
     const d = new Dispatch();
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, nodePos(4), nodePos(4));
     const r = new Rivals();
-    r.start(d, 4);
+    r.start(d, net, 4);
     for (let i = 0; i < 1500; i++) {
       r.update(0.05);
       d.update(0.05, nodePos(4), nodePos(4));
@@ -212,10 +253,10 @@ describe('rivals', () => {
 
   it('never double-book two rivals onto one order', () => {
     const d = new Dispatch();
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, nodePos(0), nodePos(0));
     for (let i = 0; i < 40; i++) d.update(1, nodePos(0), nodePos(0));
     const r = new Rivals();
-    r.start(d, 4);
+    r.start(d, net, 4);
     for (let i = 0; i < 600; i++) {
       r.update(0.05);
       d.update(0.05, nodePos(0), nodePos(0));

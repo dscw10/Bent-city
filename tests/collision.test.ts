@@ -3,6 +3,7 @@ import { makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { collideBlocks } from '../src/vehicle/collision';
 import { Dispatch } from '../src/game/dispatch';
 import { findMode } from '../src/game/modes';
+import { buildGridNetwork } from '../src/world/networks/grid';
 import { nodePos, TILE, wrapDist, wrapDelta } from '../src/core/city-layout';
 import type { Block } from '../src/render/city';
 import { PAD } from '../src/vehicle/collision';
@@ -245,9 +246,11 @@ describe('getting unstuck', () => {
 });
 
 describe('road closures', () => {
+  const net = buildGridNetwork();
+  const home = { x: nodePos(4), z: nodePos(4) };
   it('puts a barrier on every closed segment', () => {
     const d = new Dispatch();
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, home.x, home.z);
     expect(d.closures.length).toBeGreaterThan(0);
     expect(d.barriers.length).toBe(d.closures.length);
     for (let i = 0; i < d.closures.length; i++) {
@@ -258,7 +261,7 @@ describe('road closures', () => {
 
   it('is something you hit, not something you drive through', () => {
     const d = new Dispatch();
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, home.x, home.z);
     const c = d.closures[0];
     // Approach along the road the barrier blocks.
     const heading = c.alongX ? 0 : Math.PI / 2;
@@ -274,7 +277,7 @@ describe('road closures', () => {
     // The barrier spans the carriageway only. It must not seal the block, or a
     // closure stops being a detour and becomes a wall.
     const d = new Dispatch();
-    d.start(findMode('rush'));
+    d.start(findMode('rush'), net, home.x, home.z);
     for (const b of d.barriers) {
       const span = Math.max(b.w, b.d);
       expect(span).toBeLessThan(58);          // narrower than the block pitch

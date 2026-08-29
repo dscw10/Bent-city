@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { PAPER, uniforms } from './uniforms';
 import { TILE } from '../core/city-layout';
 import { bentGlow, bentMat } from './materials';
-import { buildCity, buildRoadSurface } from './city';
 import type { CityData } from './city';
 import { MarkerBatch } from './marker-batch';
 import { Smoke } from './smoke';
@@ -28,7 +27,7 @@ export class World {
   /** Tyre smoke. Flat quads, because the bend breaks camera-facing billboards. */
   readonly smoke = new Smoke();
 
-  constructor(stage: HTMLElement) {
+  constructor(stage: HTMLElement, level: { build(scene: THREE.Scene): CityData }) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     // The palette was authored as raw linear-ish values feeding vertex colours,
@@ -43,8 +42,8 @@ export class World {
 
     this.chase = new ChaseCamera();
 
-    this.city = buildCity(this.scene);
-    buildRoadSurface(this.scene);
+    // The level owns its scenery; the World owns the renderer and the batches.
+    this.city = level.build(this.scene);
 
     // Marks are flat colour, so writing depth would only make them fight each
     // other where a ring passes under a pillar. They still depth-TEST, so a

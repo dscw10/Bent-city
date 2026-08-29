@@ -733,6 +733,70 @@ Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
 
+## Levels, and the road network refactor (29 Aug)
+
+Chris: *"I'm not sure a city is the best scene for this game. I'm thinking there
+can be different levels. One could be a city but I don't want it to be a grid. I
+think a mountain pass could be a great location as well."*
+
+### The decision
+
+**A different game per place**, not the same game in new scenery. A mountain
+pass has one road, so there is no route to choose and the plan region's job
+changes completely — it stops being a map and becomes **rally pace notes**: the
+corners ahead, their severity, where the hairpins are. Seeing 400m of road laid
+flat in front of you is something no racing game can do, and it is arguably a
+better showcase for the bend than the city ever was.
+
+That makes it a second set of rules, not a reskin. Which is why the road network
+came first.
+
+### RoadNetwork
+
+`world/network.ts` — a general graph of junctions with world positions.
+Everything the RULES need now comes from it: where can I go, what is the way to
+that drop, is this segment closed, which junction am I nearest. **Nothing
+downstream knows the city is a grid.** The lattice is one generator
+(`world/networks/grid.ts`); a pass will be another.
+
+Three things worth recording about it:
+
+- **Routing is Dijkstra on real distance, not BFS on hops.** On a lattice the
+  two agree, which is why the grid version got away with hop-counting. On a pass,
+  where one link can be ten times another, hop-counting sends you the scenic way
+  round. There is a test for exactly that, on a four-node network where the two
+  disagree.
+- **The wrap is a property of the level, not of the world.** The network records
+  whether it repeats and over what distance; distances are measured through the
+  seam only when there is one. A pass simply says it does not wrap.
+- **Bakeries are placed by repeatedly taking the junction furthest from every
+  bakery so far**, rather than at three hard-coded grid coordinates. Works on
+  any shape: it lands them near the corners of a lattice and strings them along
+  the length of a pass.
+
+Order value is paid by haul length in METRES now rather than in grid steps, for
+the same reason — it has to mean the same thing on a network whose links are not
+all the same length.
+
+### What is still lattice-bound, honestly
+
+The RULES are ported. The SCENERY is not:
+
+- `render/city.ts` still generates blocks and lane dashes from grid arithmetic.
+- `core/city-layout.ts`'s `onOffroad` is grid arithmetic, exposed through the
+  Level so a pass can answer differently.
+- `world/traffic.ts` keeps left in four cardinal directions and snaps to lanes
+  by grid maths, none of which means anything on a winding road. It is off by
+  default, and a pass wants a different mover entirely, so porting it waits
+  until there is a second network to port it to.
+
+That split is deliberate rather than half-finished: a pass needs its own scenery
+generator regardless, and the shared part is the graph underneath.
+
+`Level` in `game/levels.ts` is the shape a second place slots into — network,
+wrap size, off-road test, spawn, and a `build()` that makes the scenery. Only
+the city implements it so far.
+
 ## Mario Kart drift, tyre smoke, traffic off (29 Aug)
 
 ### The hop is not decoration

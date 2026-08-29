@@ -3,9 +3,9 @@ import type { DispatchEvent, Order } from './dispatch';
 import { Rivals } from '../world/rivals';
 import { Traffic } from '../world/traffic';
 import { Pedestrians } from '../world/pedestrians';
-import { bfs, nearestNode, unwrapPath } from '../world/graph';
-import type { Point } from '../world/graph';
-import { nodePos, wrapDist, wrapDelta, nearCopy, PITCH } from '../core/city-layout';
+import type { Point } from '../world/network';
+import type { Level } from './levels';
+import { wrapDist, wrapDelta, nearCopy, PITCH } from '../core/city-layout';
 import { C } from '../core/palette';
 import { clamp } from '../core/math';
 import {
@@ -67,16 +67,20 @@ export class Game {
   /** Building footprints plus whatever is currently in the way. */
   private collision: Block[] = [];
   private staticBlocks: Block[] = [];
+  private level!: Level;
 
   private route: Point[] = [];
   private routeTimer = 0;
   private focusKey = '';
   private lowWarned = false;
 
-  bind(staticBlocks: Block[]): void {
+  bind(level: Level, staticBlocks: Block[]): void {
+    this.level = level;
     this.staticBlocks = staticBlocks;
     this.collision = staticBlocks.slice();
   }
+
+  get network() { return this.level.network; }
 
   get multiplier(): number {
     return Math.min(MAX_MULTIPLIER, 1 + Math.floor(this.stats.streak / 3));
@@ -94,8 +98,8 @@ export class Game {
       streak: 0, bestStreak: 0, elapsed: 0
     });
 
-    this.dispatch.start(mode);
-    this.rivals.start(this.dispatch, mode.rivals);
+    this.dispatch.start(mode, this.level.network, car.x, car.z);
+    this.rivals.start(this.dispatch, this.level.network, mode.rivals);
     this.traffic.setClosures(this.dispatch.closedEdges);
     this.traffic.start(save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
     this.pedestrians.start(save.settings.pedestrians ? PEDESTRIAN_COUNT : 0, car.x, car.z);
@@ -135,14 +139,13 @@ export class Game {
    * if the truck has crates, or the nearest bakery if it does not.
    */
   focus(car: Car): { x: number; z: number; order: Order | null } {
-    if (this.dispatch.crates <= 0) {
-      const b = this.dispatch.nearestBakery(car.x, car.z);
-      return { x: nodePos(b[0]), z: nodePos(b[1]), order: null };
-    }
+    const bakery = () => {
+      const [x, z] = this.dispatch.bakeryPosition(this.dispatch.nearestBakery(car.x, car.z));
+      return { x, z, order: null };
+    };
+    if (this.dispatch.crates <= 0) return bakery();
     const o = this.dispatch.nearestOrder(car.x, car.z);
-    if (o) return { x: o.x, z: o.z, order: o };
-    const b = this.dispatch.nearestBakery(car.x, car.z);
-    return { x: nodePos(b[0]), z: nodePos(b[1]), order: null };
+    return o ? { x: o.x, z: o.z, order: o } : bakery();
   }
 
   /** Everything the truck can hit this frame. */
@@ -275,7 +278,9 @@ export class Game {
     if (this.routeTimer > 0 && key === this.focusKey) return;
     this.routeTimer = 0.3;
     this.focusKey = key;
-    this.route = bfs(nearestNode(car.x, car.z), nearestNode(f.x, f.z), this.dispatch.closedEdges);
+    const net = this.level.network;
+    this.route = net.points(net.path(
+      net.nearest(car.x, car.z), net.nearest(f.x, f.z), this.dispatch.closedEdges));
   }
 
   /**
@@ -296,14 +301,14 @@ export class Game {
     const nx = (x: number) => nearCopy(x, car.x);
     const nz = (z: number) => nearCopy(z, car.z);
 
-    const path = unwrapPath(this.displayRoute(car), car.x, car.z);
+    const path = this.level.network.unwrap(this.displayRoute(car), car.x, car.z);
     drawRibbon(b, path);
     if (save.settings.turnArrows) this.drawNextTurn(b, car, path);
 
     // Bakeries. Ring only, unless the truck is empty — in which case one of
     // them is where you are actually going, and it earns the beacon.
     for (const bk of this.dispatch.bakeries) {
-      const bx = nodePos(bk[0]), bz = nodePos(bk[1]);
+      const [bx, bz] = this.dispatch.bakeryPosition(bk);
       const isFocus = this.dispatch.crates <= 0 && bx === focus.x && bz === focus.z;
       drawObjective(b, nx(bx), nz(bz), C.melon, { pillar: isFocus, ringSize: 18 });
     }

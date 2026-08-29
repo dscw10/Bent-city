@@ -1,6 +1,5 @@
 import { GRID, PITCH, nodePos, wrap, wrapDelta, wrapDist } from '../core/city-layout';
-import { edgeKey } from './graph';
-import type { Node } from './graph';
+import { edgeKey } from './network';
 import type { Block } from '../render/city';
 import type { Builder } from '../render/builder';
 import { shade } from '../core/palette';
@@ -9,6 +8,13 @@ import type { RGB } from '../core/palette';
 
 /**
  * Traffic.
+ *
+ * STILL LATTICE-BOUND, unlike the routing above it. Traffic keeps left in four
+ * cardinal directions and snaps itself to lanes by grid arithmetic, none of
+ * which means anything on a winding road. It is off by default and a mountain
+ * pass will want a different mover entirely, so porting it onto the road
+ * network is left until there is a second network to port it to.
+ *
  *
  * Not vehicles — tokens on the road graph. They keep left (this is a Japanese
  * city and a Japanese truck), pick a direction at each junction, honour road
@@ -173,11 +179,11 @@ export class Traffic {
     for (let d = 0; d < 4; d++) {
       if (d === (t.dir + 2) % 4) continue;            // never a U-turn
       // The next node in that direction, on the axis that direction moves along.
-      const to: Node = d % 2 === 0
+      const to: [number, number] = d % 2 === 0
         ? [node[0], node[1] + (d === 0 ? 1 : -1)]
         : [node[0] + (d === 1 ? 1 : -1), node[1]];
       if (to[0] < 0 || to[1] < 0 || to[0] >= GRID || to[1] >= GRID) continue;
-      if (this.closed.has(edgeKey(node, to))) continue;
+      if (this.closed.has(edgeKey(node[0] * GRID + node[1], to[0] * GRID + to[1]))) continue;
       // Straight on is three times as likely as either turn. Traffic that turns
       // at random reads as confused rather than as traffic.
       const weight = d === t.dir ? 3 : 1;
@@ -188,7 +194,7 @@ export class Traffic {
     this.snapLane(t);
   }
 
-  private nodeAt(t: TrafficCar): Node {
+  private nodeAt(t: TrafficCar): [number, number] {
     return [
       Math.max(0, Math.min(GRID - 1, Math.round(wrap(t.x) / PITCH) % GRID)),
       Math.max(0, Math.min(GRID - 1, Math.round(wrap(t.z) / PITCH) % GRID))
