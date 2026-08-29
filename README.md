@@ -32,15 +32,36 @@ GitHub Pages, Cloudflare Pages or a folder on a web server unchanged.
 
 ## Playing it
 
-**WASD** or the arrow keys to drive, **Space** to brake, **Esc** to pause,
-**M** to mute, **T** for the bend tuner. On a phone it is the one on-screen
-joystick: horizontal steers, vertical is throttle and brake.
+**Keyboard** — **WASD** or the arrows, **Space** brake, **Shift** drift,
+**Esc** pause, **M** mute, **T** the bend tuner.
 
-**With a controller** — left stick steers, **RT** is throttle and **LT** is the
-brake (**A** and **B** work too, for pads with digital triggers). **Start**
-pauses, **X** mutes, **Y** opens the bend tuner. On the menus, the **D-pad**
+**Controller** — left stick steers, **RT** throttle, **LT** brake (**A** and
+**B** work too, for pads with digital triggers), either shoulder to drift.
+**Start** pauses, **X** mutes, **Y** opens the tuner. On the menus the **D-pad**
 moves between modes and **A** confirms, so you never have to reach for the
-screen. The on-screen joystick hides itself once a pad is in use.
+screen. The touch controls hide themselves once a pad is in use.
+
+**Touch** — steering on the left, pedals on the right, so the two never compete
+for one thumb. The steering pad has no fixed position: **wherever your thumb
+first lands becomes the centre**, and it reads horizontal movement only. On a
+tablet you cannot see your thumb and are not looking at it anyway, so a control
+with a fixed position is one you keep missing. Everything is multi-touch, so
+steering, throttle and drift work together.
+
+### Drift and boost
+
+Hold drift through a corner and the back steps out: it takes grip and cornering
+stiffness off the **rear axle only**, and turns most of the arcade grip assist
+off, so the truck stops catching itself. The ring around the button fills while
+you are genuinely sideways — holding the button down a straight earns
+essentially nothing — and releasing cashes it in for a boost.
+
+The slide is bounded on purpose. With one button and no counter-steer an
+unbounded drift takes the truck through 160° and out the other side travelling
+backwards, so the assist ramps back in past about 29° of slip and the car comes
+back to you. Boost is the one place a force is applied to the body rather than
+through the tyres, because a boost that went through the friction circle would
+do almost nothing in exactly the corner you just earned it in.
 
 Load three crates of melonpan at a bakery, then deliver them. Several orders
 are live at once, each with its own countdown; rival couriers are racing you for

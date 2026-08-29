@@ -733,6 +733,60 @@ Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
 
+## Touch controls and drift (29 Aug)
+
+Chris: *"I think it could do with better mobile touch controls. Maybe separate
+the steering from acceleration... Steering on the left by default and the
+control maps to where you first touch. Other buttons on the right."*
+
+The old single stick did both axes, which is compact and quite bad: steering and
+throttle fight for the same thumb, so every hard corner costs you the throttle.
+Now steering is the whole lower-left quadrant and the pedals are a cluster
+bottom-right.
+
+Three things that matter, all of them the difference between a control that
+works on a tablet and one that nearly does:
+
+- **The steering pad floats.** There is no circle to find; wherever your thumb
+  first lands becomes the centre. On a tablet you cannot see your thumb and are
+  not looking at it anyway, so a fixed control is one you keep missing.
+- **Horizontal only.** Thumbs travel in arcs. Reading the vertical axis too
+  picks up throttle you never asked for on every single turn.
+- **Everything captures its own pointerId.** That is what makes steering,
+  throttle and drift work simultaneously, and what stops an input dropping the
+  moment a thumb wanders off the control it started on.
+
+### Drift is three existing numbers, moved
+
+Not a special case bolted on: holding drift takes grip and cornering stiffness
+off the **rear axle only** and turns most of the assist off. Everything
+downstream — weight transfer, the friction circle, the tyre audio — then behaves
+as it always did.
+
+**The first version was a spin, not a drift.** With grip at 0.68, stiffness at
+0.50 and the assist down to 0.30, holding one button with no counter-steer took
+the truck through 160° and out the other side travelling backwards. Real
+drifting is held on the steering, and a thumb has not got that input resolution.
+So the assist now ramps back in past `driftCatch` (29° of slip) and the slide is
+bounded: it settles around 33–37° and comes back to you. Same family of arcade
+device as `assist` itself, and for the same reason.
+
+Charge only accumulates while genuinely sideways, so holding the button down a
+straight is worthless. It never reaches exactly zero — cutting rear grip at full
+throttle IS power oversteer and the truck does eventually get squirrely — but it
+takes seconds, scrubs speed, and earns a fraction of what the corner you were
+taking anyway earns.
+
+Boost is the one honest exception in the whole physics model: a body force along
+the truck's axis rather than a force at the contact patches, because a boost
+that went through the friction circle would do almost nothing in exactly the
+corner you just earned it in. Marked as an arcade device rather than dressed up.
+
+One bug worth remembering: `boostFired` was being cleared at the top of
+`stepVehicle`, which runs three substeps a frame — so a release in the first
+substep was wiped by the second before anything ever saw it. The caller clears
+it now, the same way it already handled `impact`.
+
 ## The projection, revisited (29 Aug) — why the map wasn't being used
 
 Chris, playing on an iPad with a controller: *"I wasn't using the vertical map

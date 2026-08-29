@@ -63,7 +63,8 @@ canvas{display:block}
 .order.contested .pip{background:var(--rival)}
 @keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
 
-.task{position:fixed;left:16px;right:16px;bottom:calc(194px + var(--safe-b));text-align:center}
+.task{position:fixed;left:0;right:0;bottom:calc(clamp(150px,26vh,230px) + var(--safe-b));text-align:center;
+  padding:0 clamp(120px,22vw,260px)}
 /* The task line sits over the truck, and matcha green on a matcha-green truck
    bed is invisible. A halo in the background colour keeps it readable over
    anything without putting a panel on top of the view. */
@@ -84,24 +85,60 @@ canvas{display:block}
   pointer-events:none}
 .flash.bad{background:var(--rival)}
 
-/* ---- joystick ---- */
-.sticks{position:fixed;left:0;right:0;bottom:0;height:180px;
-  display:flex;justify-content:center;align-items:flex-end;
-  padding:0 20px calc(26px + var(--safe-b));pointer-events:none;
-  opacity:0;transition:opacity .3s}
-.sticks.on{opacity:1}
-.stick{position:relative;width:148px;height:148px;border-radius:50%;
-  border:1.5px solid var(--shadow);background:rgba(255,255,255,.28);
-  backdrop-filter:blur(4px);pointer-events:auto;touch-action:none}
-.stick .axis{position:absolute;background:var(--shadow);opacity:.45}
-.stick .axis.h{left:16%;right:16%;top:50%;height:1px}
-.stick .axis.v{top:16%;bottom:16%;left:50%;width:1px}
-.knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;
-  border-radius:50%;background:var(--matcha);border:2.5px solid var(--ink);
-  transition:transform .12s ease-out}
-.stick.live .knob{transition:none}
-.cap{position:absolute;left:0;right:0;bottom:-19px;text-align:center;
-  font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--shadow);font-weight:600}
+/* ---- touch controls ----
+   Steering on the left, pedals on the right, so the two never compete for one
+   thumb. Everything is sized in vmin with clamps, because a phone and an iPad
+   are the same layout at very different scales. */
+.touch{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .3s;
+  z-index:5}
+.touch.on{opacity:1}
+
+/* The steering zone is the whole lower-left quadrant. It is invisible: there is
+   nothing to aim at, because the stick appears wherever you touch. */
+.steer-zone{position:absolute;left:0;bottom:0;width:50%;height:58%;
+  pointer-events:auto;touch-action:none}
+.steer-hint{position:absolute;left:clamp(20px,5vw,56px);bottom:calc(26px + var(--safe-b));
+  font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:var(--shadow);
+  font-weight:600;opacity:.65}
+
+/* The floating stick: a track and a knob, drawn at the touch point. */
+.steer-stick{position:fixed;left:0;top:0;width:0;height:0;opacity:0;
+  transition:opacity .14s;pointer-events:none}
+.steer-stick.on{opacity:1}
+.steer-stick::before{content:"";position:absolute;left:50%;top:50%;
+  width:150px;height:5px;margin:-2.5px 0 0 -75px;border-radius:3px;
+  background:rgba(154,163,171,.45);backdrop-filter:blur(3px)}
+.steer-knob{position:absolute;left:50%;top:50%;
+  width:clamp(52px,9vmin,74px);height:clamp(52px,9vmin,74px);
+  transform:translate(-50%,-50%);border-radius:50%;
+  background:var(--matcha);border:2.5px solid var(--ink)}
+
+/* Pedals, anchored to the bottom-right corner where a right thumb reaches. */
+.pedals{position:absolute;right:clamp(16px,3vw,40px);bottom:calc(clamp(18px,3vh,40px) + var(--safe-b));
+  display:flex;flex-direction:column;align-items:flex-end;gap:clamp(10px,1.6vh,18px)}
+.pedal-row{display:flex;align-items:flex-end;gap:clamp(10px,1.6vw,18px)}
+.btn{pointer-events:auto;touch-action:none;border-radius:50%;
+  border:2px solid var(--ink);background:rgba(255,255,255,.42);backdrop-filter:blur(4px);
+  color:var(--ink);font-family:inherit;font-weight:700;text-transform:uppercase;
+  letter-spacing:.14em;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  -webkit-user-select:none;user-select:none;transition:transform .08s,background .08s}
+.btn.down{transform:scale(.93);background:rgba(255,255,255,.8)}
+.btn-accel{width:clamp(84px,15vmin,132px);height:clamp(84px,15vmin,132px);
+  font-size:clamp(11px,1.7vmin,15px);background:rgba(127,166,80,.5);border-color:var(--ink)}
+.btn-accel.down{background:rgba(127,166,80,.92)}
+.btn-brake{width:clamp(66px,11.5vmin,102px);height:clamp(66px,11.5vmin,102px);
+  font-size:clamp(9px,1.4vmin,12px)}
+.btn-drift{width:clamp(66px,11.5vmin,102px);height:clamp(66px,11.5vmin,102px);
+  font-size:clamp(9px,1.4vmin,12px);position:relative;--charge:0deg}
+/* The charge ring: a conic gradient driven by one custom property, so updating
+   it every frame costs nothing. */
+.btn-drift::before{content:"";position:absolute;inset:-6px;border-radius:50%;
+  background:conic-gradient(var(--melon) var(--charge), transparent 0);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
+  mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));
+  pointer-events:none}
+.btn-drift.charged::before{background:conic-gradient(var(--matcha) 360deg,var(--matcha) 0)}
+.btn-drift.boosting{background:rgba(232,200,122,.92)}
 
 /* ---- top bar ---- */
 .topbar{position:fixed;top:calc(14px + var(--safe-t));left:50%;transform:translateX(-50%);
@@ -222,11 +259,8 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matc
   .task .what{font-size:11px;letter-spacing:.16em}
   .task .dist{font-size:10px}
 }
-/* On a short landscape phone the joystick and the manifest collide. */
+/* A short landscape phone: pull the manifest up and shrink the gap. */
 @media (max-height:520px){
   .manifest{top:calc(76px + var(--safe-t));width:150px}
-  .task{bottom:calc(150px + var(--safe-b))}
-  .sticks{height:140px}
-  .stick{width:118px;height:118px}
-  .knob{width:46px;height:46px;margin:-23px 0 0 -23px}
+  .steer-zone{height:70%}
 }

@@ -67,6 +67,36 @@ export class Sfx {
     this.noiseBurst(0.07, 2600, 0.07);
   }
 
+  /**
+   * Cashing in a drift. A rising sweep with a noise whoosh over it, both scaled
+   * by how much charge was spent — so a scrappy little drift sounds like one.
+   */
+  boost(charge: number): void {
+    if (!this.live) return;
+    const ctx = this.audio.ctx!;
+    const bus = this.audio.bus('world')!;
+    const t = ctx.currentTime;
+    const dur = 0.35 + charge * 0.35;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(120 + 420 * charge, t + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(500, t);
+    lp.frequency.exponentialRampToValueAtTime(2600, t + dur * 0.7);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16 * (0.5 + charge * 0.5), t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(lp).connect(g).connect(bus);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+
+    this.noiseBurst(dur * 0.8, 900 + charge * 1200, 0.10 * charge);
+  }
+
   /** The last ten seconds. One per second, rising at the end. */
   tick(secondsLeft: number): void {
     if (!this.live) return;

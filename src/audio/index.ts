@@ -75,6 +75,7 @@ export class GameAudio {
   expired(): void { this.sfx.expired(); }
   sniped(): void { this.sfx.sniped(); }
   scattered(): void { this.sfx.scattered(); }
+  boost(charge: number): void { this.sfx.boost(charge); }
   finish(): void { this.sfx.finish(); }
 
   impact(speed: number): void {

@@ -30,6 +30,7 @@
  *   LT / L2        brake (analogue)
  *   A / ✕          throttle, for pads whose triggers are digital
  *   B / ○          brake
+ *   LB / RB / L1 / R1  drift
  *   Start / Options pause
  *   X / □          mute
  *   Y / △          bend tuner
@@ -103,8 +104,11 @@ export class Gamepads {
     return { connected: this.index !== null, id: this.lastId, standard: this.standard };
   }
 
-  /** True once a pad has been touched — used to hide the on-screen joystick. */
+  /** True once a pad has been touched — used to hide the touch controls. */
   get inUse(): boolean { return this.used; }
+
+  /** Either shoulder drifts, so it works whichever way round you hold it. */
+  get drift(): boolean { return this.down(BTN.LB) || this.down(BTN.RB); }
 
   /** Read every frame. Cheap; it is an array copy and a few floats. */
   poll(): void {

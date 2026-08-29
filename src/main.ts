@@ -3,7 +3,8 @@ import { Projection } from './render/projection';
 import { makeCar, stepVehicle, resetCar } from './vehicle/vehicle';
 import { collideBlocks } from './vehicle/collision';
 import { buildCar } from './vehicle/car-mesh';
-import { createJoystick, createKeyboard } from './ui/joystick';
+import { createKeyboard } from './ui/keyboard';
+import { createTouchControls } from './ui/touch-controls';
 import { Gamepads, BTN } from './ui/gamepad';
 import { createTuner } from './ui/tuner';
 import { Hud } from './ui/hud';
@@ -39,7 +40,7 @@ projection.intensity = save.settings.bendIntensity;
 const START_X = nodePos(4);
 const START_Z = nodePos(4);
 
-const stick = createJoystick(document.getElementById('stickL')!);
+const touch = createTouchControls(document.getElementById('touch')!);
 const keyboard = createKeyboard();
 const pads = new Gamepads();
 // Polled on its own timer, so a quick tap is never lost to a slow frame.
@@ -50,7 +51,7 @@ const tuner = createTuner(
   captureBend
 );
 
-const sticksEl = document.getElementById('sticks')!;
+
 const topbarEl = document.getElementById('topbar')!;
 const muteBtn = document.getElementById('muteBtn')!;
 const pauseBtn = document.getElementById('pauseBtn')!;
@@ -85,9 +86,8 @@ function syncMuteButton(): void {
 
 function setPlayingChrome(on: boolean): void {
   hud.show(on);
-  // The on-screen stick is dead weight once a controller is in play, and it
-  // sits right on top of the truck.
-  sticksEl.classList.toggle('on', on && !pads.inUse);
+  // The touch controls are dead weight once a controller is in play.
+  touch.show(on && !pads.inUse);
   topbarEl.classList.toggle('on', on);
   if (!on) tuner.close();
 }
@@ -210,8 +210,8 @@ function readGamepadUi(now: number): void {
       if (pads.pressed(BTN.START) || pads.pressed(BTN.SELECT)) pause();
       if (pads.pressed(BTN.X)) { save.settings.muted = !save.settings.muted; applySettings(); }
       if (pads.pressed(BTN.Y)) tuner.toggle();
-      // Hide the touch stick the first time the pad is actually used.
-      if (pads.inUse && sticksEl.classList.contains('on')) sticksEl.classList.remove('on');
+      // Hide the touch controls the first time the pad is actually used.
+      if (pads.inUse) touch.show(false);
   }
 }
 
@@ -240,21 +240,36 @@ function tick(now: number): void {
   readGamepadUi(now);
 
   if (live) {
-    const k = keyboard.read(stick);
-    // Whichever input is being pushed hardest wins, so a controller and the
-    // touch stick can coexist without either having to be "selected".
-    const thr = Math.abs(pads.throttle) > Math.abs(k.thr) ? pads.throttle : k.thr;
-    const str = Math.abs(pads.steer) > Math.abs(k.str) ? pads.steer : k.str;
+    const k = keyboard.read();
+    const t = touch.state;
+    const touchThr = (t.throttle ? 1 : 0) - (t.brake ? 1 : 0);
+
+    /* Three input sources, and whichever is being pushed hardest wins — so a
+       controller, the touch controls and the keyboard coexist without anything
+       having to be "selected", and picking up a pad mid-run just works. */
+    const strongest = (...v: number[]) =>
+      v.reduce((best, x) => (Math.abs(x) > Math.abs(best) ? x : best), 0);
+    const thr = strongest(pads.throttle, k.thr, touchThr);
+    const str = strongest(pads.steer, k.str, t.steer);
+    const drift = pads.drift || k.drift || t.drift;
     throttle = thr;
 
     // Three substeps: the springs are stiff and one big step goes unstable.
     const sub = dt / 3;
     const blocks = game.collisionSet();
     let impact = 0;
+    car.boostFired = 0;
     for (let i = 0; i < 3; i++) {
-      stepVehicle(car, sub, thr, str);
+      stepVehicle(car, sub, thr, str, drift);
       impact = Math.max(impact, collideBlocks(car, blocks));
     }
+    if (car.boostFired > 0) {
+      world.chase.addKick(0.5 + car.boostFired * 1.4);
+      pads.rumble(220, 0.55);
+      audio.boost(car.boostFired);
+    }
+    touch.setCharge(car.driftCharge);
+    touch.setBoosting(car.boost > 0);
     car.impact = impact;
     if (impact > 6) {
       world.chase.addKick(Math.min(1.6, impact * 0.06));
@@ -404,6 +419,10 @@ if (import.meta.env.DEV) {
     blocks: world.city.blocks.length,
     visibleTiles: world.visibleTiles,
     bend: { ...P },
+    car2: {
+      drifting: car.drifting, driftCharge: car.driftCharge,
+      boost: car.boost, v: car.v
+    },
     uniforms: {
       uZ0: uniforms.uZ0.value,
       uR: uniforms.uR.value,

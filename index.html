@@ -47,11 +47,22 @@
   <div class="toast" id="toast"></div>
 </div>
 
-<!-- ================= controls ================= -->
-<div class="sticks" id="sticks">
-  <div class="stick" id="stickL">
-    <div class="axis h"></div><div class="axis v"></div><div class="knob"></div>
-    <div class="cap">Steer &middot; Throttle &middot; Brake</div>
+<!-- ================= touch controls =================
+     Steering left, pedals right. The steering pad has no fixed position: it
+     centres wherever your thumb lands, because on a tablet you cannot see your
+     thumb and are not looking at it anyway. -->
+<div class="touch" id="touch">
+  <div class="steer-zone">
+    <div class="steer-hint">Steer</div>
+  </div>
+  <div class="steer-stick"><div class="steer-knob"></div></div>
+
+  <div class="pedals">
+    <button class="btn btn-drift" aria-label="Drift">Drift</button>
+    <div class="pedal-row">
+      <button class="btn btn-brake" aria-label="Brake and reverse">Brake</button>
+      <button class="btn btn-accel" aria-label="Accelerate">Go</button>
+    </div>
   </div>
 </div>
 
@@ -76,10 +87,11 @@
     <button class="primary" id="startBtn">Start shift</button>
     <div class="best" id="titleBest"></div>
     <div class="keys">
-      <b>WASD</b> or arrows to drive &middot; <b>Space</b> brake &middot;
+      <b>WASD</b> or arrows &middot; <b>Space</b> brake &middot; <b>Shift</b> drift &middot;
       <b>Esc</b> pause &middot; <b>M</b> mute &middot; <b>T</b> tuner<br>
       <b>Controller</b> left stick steers &middot; <b>RT</b> go &middot; <b>LT</b> brake &middot;
-      <b>A</b> select &middot; <b>Start</b> pause &middot; <b>X</b> mute &middot; <b>Y</b> tuner
+      <b>LB/RB</b> drift &middot; <b>A</b> select &middot; <b>Start</b> pause<br>
+      <b>Touch</b> steer anywhere on the left &middot; pedals on the right
       <span class="pad-note" id="padNote">&mdash; press a button on the pad to wake it</span>
     </div>
   </div>

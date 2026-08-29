@@ -1,7 +1,7 @@
 import { P } from '../core/config';
 import { terrainAt, slopeAt } from '../core/terrain';
 import { wrap, onOffroad, nodePos } from '../core/city-layout';
-import { clamp } from '../core/math';
+import { clamp, shortAngle } from '../core/math';
 
 /**
  * ============================ vehicle ============================
@@ -68,6 +68,55 @@ export const V = {
    * LOWER assist = more sliding and more skill required. This is the difficulty dial.
    */
   assist: 2.4,
+
+  /* ---- drift and boost ----
+   *
+   * Drift is not a special case bolted onto the physics: it is three of the
+   * existing numbers, moved. Holding it takes grip and cornering stiffness off
+   * the REAR axle only, and turns most of the assist off — so the back steps
+   * out and stops being caught for you. Everything downstream (weight transfer,
+   * the friction circle, the tyre audio) then behaves as it always did.
+   *
+   * Boost is the one honest exception. It is a body force along the truck's
+   * axis rather than a force at the contact patches, because a boost that went
+   * through the friction circle would do almost nothing in exactly the corner
+   * you just earned it in. Same category of arcade device as `assist`, and
+   * marked as such rather than dressed up. */
+  driftGrip: 0.82,        // rear mu while drifting
+  driftCorner: 0.70,      // rear cornering stiffness while drifting
+  driftAssist: 0.45,      // how much of the assist survives a drift
+  /**
+   * Slip angle, in radians, beyond which the assist comes back hard regardless
+   * of the drift button.
+   *
+   * Without this a drift is not a drift, it is a spin: holding one button with
+   * no counter-steer took the truck through 160° and out the other side,
+   * travelling backwards. Real drifting is held on the steering, and a player
+   * with a thumb on a phone has not got the input resolution for that — so the
+   * car catches itself at the far edge instead. Same family of arcade device as
+   * `assist`, and for the same reason.
+   */
+  driftCatch: 0.50,
+  /**
+   * Body slip angle, in radians, above which a drift counts as a drift.
+   *
+   * Set above the wander that full throttle alone produces. Holding the button
+   * flat out down a straight does eventually get squirrely — that is honest
+   * power oversteer with the rear grip cut — but it takes seconds, scrubs speed
+   * and charges far slower than simply taking the corner you were going to take
+   * anyway. So it is never worth farming.
+   */
+  driftSlip: 0.20,
+  /** Full charge takes this many seconds of genuinely sideways drifting. */
+  driftChargeTime: 1.9,
+  /** A drift shorter than this earns nothing, so a stab of the button is not a boost. */
+  driftMinCharge: 0.22,
+  boostForce: 11000,
+  /** Seconds of boost from a full charge. */
+  boostTime: 1.7,
+  /** Boost fades out as speed approaches this multiple of vMax. */
+  boostCeiling: 1.25,
+
   rollC: 45, rollV: 5, aero: 0.62,
   /** Yaw is hard-limited so the truck can never spin like a top. */
   maxYawRate: 2.6
@@ -93,6 +142,19 @@ export interface Car {
   slipRatio: number[];
   /** True while any wheel is on pavement/park rather than carriageway. */
   offroad: boolean;
+  /** True while the drift input is held AND the truck is actually sliding. */
+  drifting: boolean;
+  /** 0..1 how much boost the current drift has earned. */
+  driftCharge: number;
+  /** Seconds of boost left to spend. */
+  boost: number;
+  /**
+   * Set when a drift is cashed in; the magnitude is the charge spent. The
+   * CALLER clears it, not stepVehicle — there are three substeps a frame, and
+   * clearing it here meant a release in the first substep was wiped by the
+   * second before anything ever saw it.
+   */
+  boostFired: number;
   /** Set for one step when the truck hits something. Magnitude is the impact speed. */
   impact: number;
 }
@@ -105,6 +167,10 @@ export function makeCar(): Car {
     load: [0, 0, 0, 0], wheelY: [0, 0, 0, 0],
     slipRatio: [0, 0, 0, 0],
     offroad: false,
+    drifting: false,
+    driftCharge: 0,
+    boost: 0,
+    boostFired: 0,
     impact: 0
   };
 }
@@ -117,6 +183,10 @@ export function resetCar(car: Car, x: number, z: number, a: number): void {
   car.pitchRate = car.rollRate = 0;
   car.load.fill(0);
   car.slipRatio.fill(0);
+  car.drifting = false;
+  car.driftCharge = 0;
+  car.boost = 0;
+  car.boostFired = 0;
   car.impact = 0;
 }
 
@@ -126,7 +196,7 @@ export function resetCar(car: Car, x: number, z: number, a: number): void {
  *
  * `thr` is −1..1 (throttle above zero, brake below), `str` is −1..1.
  */
-export function stepVehicle(car: Car, h: number, thr: number, str: number): void {
+export function stepVehicle(car: Car, h: number, thr: number, str: number, drift = false): void {
   const sa = Math.sin(car.a), ca = Math.cos(car.a);
   const fx = sa, fz = ca;      // forward
   const lx = ca, lz = -sa;     // left
@@ -134,6 +204,17 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
   const off = onOffroad(car.x, car.z);
   car.offroad = off;
   const mu = V.mu * (off ? 0.66 : 1);
+
+  /* ---- drift ----
+     The button alone is not a drift. It has to actually break the back away,
+     which means it only counts above walking pace — otherwise you could sit
+     still with the button held and charge a boost out of nothing. */
+  const planar = Math.hypot(car.vx, car.vz);
+  const bodySlip = planar > 1
+    ? Math.abs(shortAngle(car.a - Math.atan2(car.vx, car.vz)))
+    : 0;
+  const driftHeld = drift && planar > 6;
+  car.drifting = driftHeld;
 
   const speed = car.vx * fx + car.vz * fz;
   const steer = -str * V.maxSteer * (1 - 0.45 * Math.min(1, Math.abs(speed) / P.vMax));
@@ -190,11 +271,16 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
     const vf = vpx * wfx + vpz * wfz;
     const vs = vpx * wsx + vpz * wsz;
 
-    const grip = mu * Fn;
+    // Drifting takes grip and cornering stiffness off the REAR axle only. Doing
+    // it to both would just make the truck plough; doing it to the rear is what
+    // makes the back end come round.
+    const rearDrift = driftHeld && W.rear;
+    const grip = mu * Fn * (rearDrift ? V.driftGrip : 1);
 
     // Slip ANGLE rather than slip velocity, so behaviour is sane at all speeds.
     const slip = Math.atan2(vs, Math.abs(vf) + 1.0);
-    let fLat = -slip * (W.front ? V.cornerF : V.cornerR) * Fn;
+    const corner = W.front ? V.cornerF : V.cornerR * (rearDrift ? V.driftCorner : 1);
+    let fLat = -slip * corner * Fn;
 
     /* Longitudinal force. There are FOUR cases here, not two, and getting that
        wrong is what left the truck unable to reverse out of a building.
@@ -258,6 +344,17 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
   Fx -= V.mass * 9.81 * gx;
   Fz -= V.mass * 9.81 * gz;
 
+  /* ---- boost ----
+     A body force along the truck's axis, fading out as speed approaches the
+     ceiling so it cannot be stacked into orbit. See the note on V.boostForce
+     for why this is not applied at the contact patches. */
+  if (car.boost > 0) {
+    car.boost = Math.max(0, car.boost - h);
+    const headroom = 1 - Math.min(1, Math.abs(speed) / (P.vMax * V.boostCeiling));
+    Fx += fx * V.boostForce * headroom;
+    Fz += fz * V.boostForce * headroom;
+  }
+
   // Aerodynamic drag, on the body rather than the tyres.
   const sp = Math.hypot(car.vx, car.vz);
   Fx -= car.vx * V.aero * sp;
@@ -292,9 +389,29 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number): void
     // Whichever end of the axis we are actually travelling along.
     const axis = Math.abs(toNose) > Math.PI / 2 ? car.a + Math.PI : car.a;
     const offA = Math.atan2(Math.sin(axis - vdir), Math.cos(axis - vdir));
-    const na = vdir + offA * Math.min(1, V.assist * h);
+    /* Part of the assist switches off in a drift — that is what lets the back
+       step out. But it ramps back in past `driftCatch`, so the slide is bounded
+       and comes back to you instead of spinning. */
+    let rate = V.assist * (driftHeld ? V.driftAssist : 1);
+    if (bodySlip > V.driftCatch) {
+      rate += ((bodySlip - V.driftCatch) / V.driftCatch) * V.assist * 3;
+    }
+    const na = vdir + offA * Math.min(1, rate * h);
     car.vx = Math.sin(na) * spd2;
     car.vz = Math.cos(na) * spd2;
+  }
+
+  /* Charge only while genuinely sideways, so holding the button through a
+     straight does nothing. Releasing cashes it in — and a stab too short to
+     have earned anything is worth nothing rather than a little. */
+  if (driftHeld && bodySlip > V.driftSlip) {
+    car.driftCharge = Math.min(1, car.driftCharge + h / V.driftChargeTime);
+  } else if (!driftHeld && car.driftCharge > 0) {
+    if (car.driftCharge >= V.driftMinCharge) {
+      car.boostFired = car.driftCharge;
+      car.boost = car.driftCharge * V.boostTime;
+    }
+    car.driftCharge = 0;
   }
 
   car.y += car.vy * h;

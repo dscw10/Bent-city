@@ -169,6 +169,141 @@ describe('cornering', () => {
   });
 });
 
+describe('drift and boost', () => {
+  const run = (seconds: number, thr: number, str: number, drift: boolean,
+               car = makeCar(), fresh = true) => {
+    if (fresh) resetCar(car, nodePos(2), nodePos(2), 0);
+    const dt = 1 / 60;
+    for (let i = 0; i < Math.round(seconds / dt); i++) {
+      car.boostFired = 0;
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, thr, str, drift);
+    }
+    return car;
+  };
+
+  it('slides further with drift held than without', () => {
+    // The whole point: the back steps out and stops being caught for you.
+    const plain = makeCar();
+    run(3, 1, 0, false, plain);
+    run(3, 1, 1, false, plain, false);
+
+    const drifted = makeCar();
+    run(3, 1, 0, false, drifted);
+    run(3, 1, 1, true, drifted, false);
+
+    const slip = (c: typeof plain) =>
+      Math.abs(Math.atan2(Math.sin(c.a - Math.atan2(c.vx, c.vz)),
+                          Math.cos(c.a - Math.atan2(c.vx, c.vz))));
+    expect(slip(drifted)).toBeGreaterThan(slip(plain) * 1.4);
+  });
+
+  it('charges from a corner, not from holding the button down a straight', () => {
+    /* It never reaches zero, because cutting the rear grip and holding full
+       throttle IS power oversteer and the truck does eventually get squirrely.
+       What matters is that it is nowhere near worth doing: a straight earns a
+       fraction of what the corner you were taking anyway earns, and costs speed
+       for the privilege. */
+    const straight = makeCar();
+    run(4, 1, 0, true, straight);
+    expect(straight.driftCharge).toBeLessThan(0.1);
+
+    const corner = makeCar();
+    run(2, 1, 0, false, corner);
+    run(1.5, 1, 1, true, corner, false);
+    expect(corner.driftCharge).toBeGreaterThan(0.3);
+    expect(corner.driftCharge).toBeGreaterThan(straight.driftCharge * 4);
+  });
+
+  it('holds a bounded slide rather than spinning right round', () => {
+    /* With one button and no counter-steer, an unbounded drift took the truck
+       through 160° and out the other side travelling backwards. A drift has to
+       come back to you. */
+    const car = makeCar();
+    run(2, 1, 0, false, car);
+    const dt = 1 / 60;
+    let worst = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 1, true);
+      worst = Math.max(worst, Math.abs(
+        Math.atan2(Math.sin(car.a - Math.atan2(car.vx, car.vz)),
+                   Math.cos(car.a - Math.atan2(car.vx, car.vz)))));
+    }
+    expect(worst).toBeGreaterThan(0.25);                 // it really does slide
+    expect(worst).toBeLessThan(Math.PI / 2);             // but never spins round
+    expect(car.v).toBeGreaterThan(0);                    // still going forwards
+  });
+
+  it('will not charge from a standstill', () => {
+    const car = makeCar();
+    run(3, 0, 1, true, car);
+    expect(car.driftCharge).toBe(0);
+    expect(car.drifting).toBe(false);
+  });
+
+  it('cashes the charge in on release, once', () => {
+    const car = makeCar();
+    run(2, 1, 0, false, car);
+    run(1.5, 1, 1, true, car, false);
+    const charge = car.driftCharge;
+    expect(charge).toBeGreaterThan(V.driftMinCharge);
+
+    car.boostFired = 0;
+    const dt = 1 / 60;
+    for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 1, false);   // released
+    expect(car.boostFired).toBeCloseTo(charge, 5);
+    expect(car.boost).toBeGreaterThan(0);
+    expect(car.driftCharge).toBe(0);
+
+    // And not again on the following frame.
+    car.boostFired = 0;
+    for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 1, false);
+    expect(car.boostFired).toBe(0);
+  });
+
+  it('pays nothing for a stab of the button', () => {
+    const car = makeCar();
+    run(2, 1, 0, false, car);
+    run(0.12, 1, 1, true, car, false);         // far too short to have earned it
+    car.boostFired = 0;
+    const dt = 1 / 60;
+    for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 1, false);
+    expect(car.boostFired).toBe(0);
+    expect(car.boost).toBe(0);
+  });
+
+  it('actually goes faster on boost, and the boost runs out', () => {
+    const dt = 1 / 60;
+    const measure = (withBoost: boolean) => {
+      const car = makeCar();
+      resetCar(car, nodePos(2), nodePos(2), 0);
+      for (let i = 0; i < 60 * 4; i++) for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+      if (withBoost) car.boost = V.boostTime;
+      for (let i = 0; i < 60 * 1.5; i++) for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+      return car;
+    };
+    const boosted = measure(true);
+    const plain = measure(false);
+    expect(boosted.v).toBeGreaterThan(plain.v + 3);
+    expect(boosted.boost).toBeGreaterThan(0);
+
+    // It expires rather than lasting forever.
+    for (let i = 0; i < 60 * 3; i++) for (let k = 0; k < 3; k++) stepVehicle(boosted, dt / 3, 1, 0);
+    expect(boosted.boost).toBe(0);
+  });
+
+  it('cannot be stacked past the ceiling', () => {
+    const dt = 1 / 60;
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    for (let i = 0; i < 60 * 40; i++) {
+      car.boost = V.boostTime;                 // held on permanently
+      for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 1, 0);
+    }
+    expect(car.v).toBeLessThan(P.vMax * V.boostCeiling + 6);
+    expect(Number.isFinite(car.v)).toBe(true);
+  });
+});
+
 describe('terrain', () => {
   it('costs speed uphill and gives it back downhill', () => {
     // Find the steepest slope on the map and coast down it, then up it.
