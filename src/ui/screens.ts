@@ -167,6 +167,15 @@ export class Screens {
       v => { save.settings.cityLife = v; persist(); this.cb.onSettingsChanged(); }
     ));
 
+    list.appendChild(this.sliderRow(
+      'Steering',
+      'Calm to lively. Moves the steering rate, the yaw inertia and the damping together — this is a feel setting, not an accuracy one.',
+      0, 1, 0.02,
+      () => save.settings.steering,
+      v => { save.settings.steering = v; persist(); this.cb.onSettingsChanged(); },
+      v => v < 0.2 ? 'calm' : v > 0.75 ? 'lively' : `${Math.round(v * 100)}`
+    ));
+
     list.appendChild(this.toggleRow(
       'Turn arrows',
       'Paints the next turn on the road. With it on, the street answers the immediate question and the map is only needed for the corner after that — turn it off to find out whether you are really reading the map.',

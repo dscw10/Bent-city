@@ -1,7 +1,7 @@
 import { P } from '../core/config';
 import { terrainAt, slopeAt } from '../core/terrain';
 import { wrap, onOffroad, nodePos } from '../core/city-layout';
-import { clamp, shortAngle } from '../core/math';
+import { clamp, lerp, shortAngle } from '../core/math';
 
 /**
  * ============================ vehicle ============================
@@ -41,8 +41,29 @@ export const V = {
   comH: 0.42, attachDrop: 0.05,
   wheelR: 0.28, susRest: 0.34,
   springK: 17000, damper: 1950, arb: 2000, arbMax: 2500,
-  Iyaw: 560, Ipitch: 470, Iroll: 210,
-  drive: 16500, brake: 15000, maxSteer: 0.66,
+  Ipitch: 470, Iroll: 210,
+  drive: 16500, brake: 15000,
+
+  /* ---- steering feel ----
+   *
+   * This is where the game stops pretending to be a simulation, deliberately.
+   *
+   * The road wheels used to snap to the commanded angle in a single step, so a
+   * flick of a stick or a tap of a key WAS full lock, instantly. No steering
+   * rack in the world does that, and nothing that does can feel anything but
+   * nervous. The wheels now turn at a finite rate — and come back to centre
+   * faster than they go out, which is what makes the truck settle after a
+   * corner instead of hunting.
+   *
+   * `maxSteer` came down from 0.66 rad (38°, more lock than a road car has) and
+   * the speed falloff went up, so a twitch at 50 m/s is no longer the same
+   * input as a twitch in a car park.
+   */
+  maxSteer: 0.55,
+  /** How much of the lock is taken away at vMax. */
+  steerFalloff: 0.60,
+  /** Returning to centre is always quicker than turning in. */
+  steerReturnBoost: 1.7,
   /**
    * Reverse. Deliberately weak and speed-limited: a kei truck reverses like a
    * kei truck, and a fast reverse turns every mistake into a rewind rather than
@@ -122,6 +143,40 @@ export const V = {
   maxYawRate: 2.6
 } as const;
 
+/**
+ * The parts of the handling a player is allowed to move at runtime.
+ *
+ * Steering feel is personal and depends on the input device — a thumb on glass,
+ * an analogue stick and a keyboard all want different numbers — so it is a
+ * setting rather than a constant, in the same spirit as the bend sliders.
+ * 0 is calm and deliberate; 1 is roughly the old instant-response steering.
+ */
+export const TUNE = { steerSpeed: 0.28 };
+
+/**
+ * The two ends of that one dial. Everything about how eager the truck feels
+ * moves together, because three sliders for "steering feel" is three ways to
+ * make it worse and one player who never touches any of them.
+ *
+ * Rate limiting the road wheels turned out to be the SMALLER half of the
+ * problem, which was worth finding out by measuring rather than assuming: it
+ * moved turn-in from 0.050s to 0.083s and left peak yaw untouched at 1.14 rad/s
+ * — 65°/s, almost immediately, which is what actually reads as nervous. What
+ * governs that is how eagerly the BODY rotates, so yaw inertia and yaw damping
+ * are on the same dial and doing most of the work.
+ */
+const FEEL = {
+  /** Steering rate limit, rad/s. */
+  rate: [2.2, 7.0],
+  /** Yaw inertia. Higher = longer to start AND to stop rotating. */
+  inertia: [1050, 560],
+  /** Yaw damping per second. Higher = less overshoot, less hunting. */
+  damp: [2.1, 0.6]
+} as const;
+
+const feel = (pair: readonly [number, number]) =>
+  lerp(pair[0], pair[1], TUNE.steerSpeed);
+
 /** [sideways offset (+ is left), forward offset, front?, rear?] */
 export const WHEELS = [
   { s:  V.halfTrack, f: V.axleF, front: true,  rear: false },
@@ -142,6 +197,8 @@ export interface Car {
   slipRatio: number[];
   /** True while any wheel is on pavement/park rather than carriageway. */
   offroad: boolean;
+  /** Current front road-wheel angle. Rate limited, so it lags the input. */
+  steer: number;
   /** True while the drift input is held AND the truck is actually sliding. */
   drifting: boolean;
   /** 0..1 how much boost the current drift has earned. */
@@ -166,6 +223,7 @@ export function makeCar(): Car {
     yaw: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
     load: [0, 0, 0, 0], wheelY: [0, 0, 0, 0],
     slipRatio: [0, 0, 0, 0],
+    steer: 0,
     offroad: false,
     drifting: false,
     driftCharge: 0,
@@ -183,6 +241,7 @@ export function resetCar(car: Car, x: number, z: number, a: number): void {
   car.pitchRate = car.rollRate = 0;
   car.load.fill(0);
   car.slipRatio.fill(0);
+  car.steer = 0;
   car.drifting = false;
   car.driftCharge = 0;
   car.boost = 0;
@@ -217,7 +276,17 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   car.drifting = driftHeld;
 
   const speed = car.vx * fx + car.vz * fz;
-  const steer = -str * V.maxSteer * (1 - 0.45 * Math.min(1, Math.abs(speed) / P.vMax));
+
+  /* Steering is RATE LIMITED rather than instantaneous — see the note on
+     V.maxSteer. Coming back to centre is quicker than going out, so the truck
+     settles after a corner rather than hunting about. */
+  const target = -str * V.maxSteer *
+    (1 - V.steerFalloff * Math.min(1, Math.abs(speed) / P.vMax));
+  const turning = Math.abs(target) >= Math.abs(car.steer) &&
+    Math.sign(target) === Math.sign(car.steer || target);
+  const rate = feel(FEEL.rate) * (turning ? 1 : V.steerReturnBoost);
+  car.steer += clamp(target - car.steer, -rate * h, rate * h);
+  const steer = car.steer;
 
   let Fx = 0, Fz = 0, Fy = 0, tYaw = 0, tPitch = 0, tRoll = 0;
 
@@ -365,10 +434,10 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   car.vz += (Fz / V.mass) * h;
   car.vy += (Fy / V.mass - 9.81) * h;
 
-  car.yaw += (tYaw / V.Iyaw) * h;
+  car.yaw += (tYaw / feel(FEEL.inertia)) * h;
   car.pitchRate += (tPitch / V.Ipitch) * h;
   car.rollRate += (tRoll / V.Iroll) * h;
-  car.yaw *= (1 - 0.6 * h);
+  car.yaw *= (1 - feel(FEEL.damp) * h);
   car.pitchRate *= (1 - 1.1 * h);
   car.rollRate *= (1 - 1.1 * h);
   car.yaw = clamp(car.yaw, -V.maxYawRate, V.maxYawRate);

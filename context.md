@@ -733,6 +733,39 @@ Triggers are buttons 6 and 7 with an analogue `.value` under the standard
 mapping, not axes — reading them as axes gets you nothing on the controllers
 people actually own.
 
+## Steering feel (29 Aug)
+
+Chris: *"The steering feels too lively. I think we can suspend reality for this
+game and make it feel good rather than accurate."*
+
+Taken at face value, and the measuring was worth more than the theorising.
+
+**The obvious cause was the smaller half.** The road wheels snapped to the
+commanded angle in a single step, so a flick of a stick or a tap of a key WAS
+full lock, instantly. Rate limiting them is clearly right — and on its own it
+moved turn-in from 0.050s to 0.083s and left peak yaw completely untouched at
+1.14 rad/s. Sixty-five degrees a second, almost immediately. That is what reads
+as nervous, and it is not the steering rack.
+
+**What governs it is how eagerly the body rotates.** Yaw inertia and yaw damping
+did most of the work:
+
+| Setting | turn-in to 0.5 rad/s | peak yaw | radius at 10 / 20 / 30 m/s |
+|---|---|---|---|
+| lively (≈ what shipped) | 0.050s | 1.15 | 8 / 25 / 28 m |
+| default (0.28) | 0.105s | 0.89 | 11 / 27 / 60 m |
+| calm | 0.133s | 0.80 | 11 / 31 / 67 m |
+
+Note the last column, which is the part worth keeping: the LIVELY setting only
+manages a 28m radius at "30 m/s" because it cannot hold 30 — it scrubs down to
+24.4. The calm setting holds 28.5 through the same corner. **Calmer is faster**,
+because it is not sawing at the tyres.
+
+All of it moves on one dial, exposed as a Steering setting. Three separate
+sliders for "feel" is three ways to make it worse and one player who never
+touches any of them. `Iyaw` left `V` entirely — having a constant and a runtime
+value for the same thing is a bug waiting to happen.
+
 ## Touch controls and drift (29 Aug)
 
 Chris: *"I think it could do with better mobile touch controls. Maybe separate

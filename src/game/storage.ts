@@ -21,6 +21,13 @@ export interface Settings {
   /** Show traffic and pedestrians. Off is a meaningful performance lever. */
   cityLife: boolean;
   /**
+   * Steering feel, 0 calm to 1 lively. Not an accuracy setting — it moves the
+   * steering rate limit, the yaw inertia and the yaw damping together, because
+   * what a thumb on glass wants and what an analogue stick wants are different
+   * numbers.
+   */
+  steering: number;
+  /**
    * Paint a turn arrow at the next junction. On, the near field answers the
    * immediate question and the map is only needed for the one after it. Off is
    * the sharpest test of whether the map is carrying its weight.
@@ -43,6 +50,7 @@ const DEFAULTS: SaveData = {
     muted: false,
     bendIntensity: 1,
     cityLife: true,
+    steering: 0.28,
     turnArrows: true,
     bend: { ...DEFAULT_BEND }
   },

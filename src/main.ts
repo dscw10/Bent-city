@@ -1,6 +1,6 @@
 import { World } from './render/world';
 import { Projection } from './render/projection';
-import { makeCar, stepVehicle, resetCar } from './vehicle/vehicle';
+import { makeCar, stepVehicle, resetCar, TUNE } from './vehicle/vehicle';
 import { collideBlocks } from './vehicle/collision';
 import { buildCar } from './vehicle/car-mesh';
 import { createKeyboard } from './ui/keyboard';
@@ -68,6 +68,7 @@ const screens = new Screens({
 
 function applySettings(): void {
   projection.intensity = save.settings.bendIntensity;
+  TUNE.steerSpeed = save.settings.steering;
   audio.setVolume(save.settings.volume);
   audio.setMuted(save.settings.muted);
   // Persist here rather than in each caller: the mute button and the M key
@@ -358,7 +359,7 @@ world.resize();
 resetCar(car, START_X, START_Z, 0);
 projection.reset(car.a);
 carMesh.setCargo(0);
-syncMuteButton();
+applySettings();
 screens.showTitle();
 requestAnimationFrame(tick);
 

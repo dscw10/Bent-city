@@ -48,6 +48,19 @@ tablet you cannot see your thumb and are not looking at it anyway, so a control
 with a fixed position is one you keep missing. Everything is multi-touch, so
 steering, throttle and drift work together.
 
+### Steering feel
+
+Deliberately not a simulation. The road wheels are rate limited rather than
+snapping to the commanded angle, they return to centre faster than they leave
+it, and lock is taken away with speed. The **Steering** setting on the pause
+screen moves the rate limit, the yaw inertia and the yaw damping together on one
+dial, calm to lively, because a thumb on glass and an analogue stick want
+different numbers.
+
+Worth knowing: calmer is *faster* through quick corners. The lively end reaches
+a tighter radius only because it cannot hold the speed — it scrubs 30 m/s down
+to 24 where the calm end holds 28.
+
 ### Drift and boost
 
 Hold drift through a corner and the back steps out: it takes grip and cornering

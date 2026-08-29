@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { V, makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
+import { V, TUNE, makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { terrainAt, slopeAt } from '../src/core/terrain';
 import { nodePos, TILE } from '../src/core/city-layout';
 import { P } from '../src/core/config';
@@ -166,6 +166,93 @@ describe('cornering', () => {
     let slip = car.a - vdir;
     slip = Math.atan2(Math.sin(slip), Math.cos(slip));
     expect(Math.abs(slip)).toBeLessThan(0.6);
+  });
+});
+
+describe('steering feel', () => {
+  /**
+   * The road wheels used to snap to the commanded angle in a single step, so a
+   * flick of a stick WAS full lock instantly. These pin the fix down, and pin
+   * down which half of it actually mattered — rate limiting the wheels was the
+   * smaller half; how eagerly the BODY rotates was the rest.
+   */
+  const dt = 1 / 60;
+  const hold = (seconds: number, thr: number, str: number, car = makeCar()) => {
+    const n = Math.round(seconds / dt);
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, thr, str);
+    return car;
+  };
+
+  it('does not reach full lock in a single step', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 0, 1);
+    expect(Math.abs(car.steer)).toBeGreaterThan(0);
+    expect(Math.abs(car.steer)).toBeLessThan(V.maxSteer * 0.4);
+  });
+
+  it('comes back to centre quicker than it goes out', () => {
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    hold(0.1, 0.3, 1, car);
+    const out = Math.abs(car.steer);
+    hold(0.1, 0.3, 0, car);
+    // Same elapsed time: it must have shed more than it gained.
+    expect(Math.abs(car.steer)).toBeLessThan(out * 0.6);
+  });
+
+  it('takes lock away with speed', () => {
+    const slow = makeCar();
+    resetCar(slow, nodePos(2), nodePos(2), 0);
+    hold(1.5, 0, 1, slow);
+    const fast = makeCar();
+    resetCar(fast, nodePos(2), nodePos(2), 0);
+    hold(9, 1, 0, fast);
+    hold(1.5, 1, 1, fast);
+    expect(Math.abs(fast.v)).toBeGreaterThan(20);
+    expect(Math.abs(fast.steer)).toBeLessThan(Math.abs(slow.steer) * 0.8);
+  });
+
+  it('is measurably calmer on the calm setting than the lively one', () => {
+    const peakYaw = (setting: number) => {
+      TUNE.steerSpeed = setting;
+      const car = makeCar();
+      resetCar(car, nodePos(2), nodePos(2), 0);
+      hold(6, 1, 0, car);
+      let peak = 0;
+      for (let i = 0; i < 60 * 0.6; i++) {
+        for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, 0.4, 1);
+        peak = Math.max(peak, Math.abs(car.yaw));
+      }
+      return peak;
+    };
+    const lively = peakYaw(1);
+    const calm = peakYaw(0);
+    TUNE.steerSpeed = 0.28;
+    expect(calm).toBeLessThan(lively * 0.8);
+  });
+
+  it('still turns tightly enough to take a junction at junction speed', () => {
+    /* Calmer must not mean it cannot get round a corner. The roads are 14m
+       wide, so a turn taken at a sensible 10 m/s has to come in under about
+       that. The speed is HELD through the corner — measuring at whatever speed
+       the truck happens to reach measures the throttle, not the steering. */
+    TUNE.steerSpeed = 0;
+    const car = makeCar();
+    resetCar(car, nodePos(2), nodePos(2), 0);
+    const target = 10;
+    const drive = (str: number, seconds: number) => {
+      for (let i = 0; i < Math.round(seconds / dt); i++) {
+        const thr = Math.max(-1, Math.min(1, (target - car.v) * 0.35));
+        for (let k = 0; k < 3; k++) stepVehicle(car, dt / 3, thr, str);
+      }
+    };
+    drive(0, 6);
+    drive(1, 3);
+    const radius = Math.abs(car.v) / Math.abs(car.yaw);
+    TUNE.steerSpeed = 0.28;
+    expect(car.v).toBeGreaterThan(8);
+    expect(radius).toBeLessThan(14);
   });
 });
 
