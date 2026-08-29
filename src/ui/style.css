@@ -192,6 +192,11 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matc
   margin-top:14px;font-variant-numeric:tabular-nums}
 .keys{font-size:10px;letter-spacing:.1em;color:var(--shadow);margin-top:10px;line-height:1.7}
 .keys b{color:var(--ink);letter-spacing:.16em}
+/* A pad is invisible to the browser until a button is pressed on it, so the
+   hint has to say so — "no controller found" would be a lie. */
+.pad-note{display:block;font-style:italic;letter-spacing:.06em}
+.keys.pad-live .pad-note{color:var(--matcha);font-style:normal}
+.controller-status{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* On a narrow screen the centred button row lands straight on top of the
    clock, which is the one readout you cannot afford to lose. Stack the buttons

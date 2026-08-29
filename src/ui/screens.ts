@@ -24,11 +24,15 @@ export interface ScreenCallbacks {
  * world keeps rendering behind them, because a frozen frame behind a menu makes
  * a game feel switched off rather than paused.
  */
+export type OpenScreen = 'title' | 'pause' | 'result' | null;
+
 export class Screens {
   private readonly title = el('titleScreen');
   private readonly pause = el('pauseScreen');
   private readonly result = el('resultScreen');
   private selected: Mode = MODES[0];
+  private modeButtons: HTMLElement[] = [];
+  private controllerRow: HTMLElement | null = null;
 
   constructor(private readonly cb: ScreenCallbacks) {
     this.buildModeList();
@@ -42,8 +46,35 @@ export class Screens {
   }
 
   get mode(): Mode { return this.selected; }
-  get anyOpen(): boolean {
-    return [this.title, this.pause, this.result].some(s => s.classList.contains('on'));
+
+  get anyOpen(): boolean { return this.open !== null; }
+
+  /** Which screen is up, so a controller knows what its buttons mean. */
+  get open(): OpenScreen {
+    if (this.title.classList.contains('on')) return 'title';
+    if (this.pause.classList.contains('on')) return 'pause';
+    if (this.result.classList.contains('on')) return 'result';
+    return null;
+  }
+
+  /** Move the mode selection by one, for D-pad navigation. Wraps. */
+  cycleMode(delta: number): void {
+    const i = MODES.indexOf(this.selected);
+    const next = (i + delta + MODES.length) % MODES.length;
+    this.selectMode(next);
+  }
+
+  private selectMode(index: number): void {
+    this.selected = MODES[index];
+    this.modeButtons.forEach((b, i) => b.classList.toggle('sel', i === index));
+    this.showTitle();          // refresh the best-score line for this mode
+  }
+
+  /** Live controller state, shown on the pause screen so a first pairing is diagnosable. */
+  setControllerStatus(text: string): void {
+    if (this.controllerRow && this.controllerRow.textContent !== text) {
+      this.controllerRow.textContent = text;
+    }
   }
 
   showTitle(): void {
@@ -86,23 +117,18 @@ export class Screens {
 
   private buildModeList(): void {
     const list = el('modeList');
-    const buttons: HTMLElement[] = [];
-    for (const m of MODES) {
+    for (let i = 0; i < MODES.length; i++) {
+      const m = MODES[i];
       const btn = document.createElement('button');
       btn.className = 'mode';
       btn.innerHTML =
         `<i class="dot"></i><span><span class="name">${m.name}</span>` +
         `<span class="desc">${m.desc}</span></span>`;
-      btn.addEventListener('click', () => {
-        this.selected = m;
-        for (const b of buttons) b.classList.remove('sel');
-        btn.classList.add('sel');
-        this.showTitle();          // refresh the best-score line for this mode
-      });
-      buttons.push(btn);
+      btn.addEventListener('click', () => this.selectMode(i));
+      this.modeButtons.push(btn);
       list.appendChild(btn);
     }
-    buttons[0].classList.add('sel');
+    this.modeButtons[0].classList.add('sel');
   }
 
   /**
@@ -140,6 +166,17 @@ export class Screens {
       () => save.settings.cityLife,
       v => { save.settings.cityLife = v; persist(); this.cb.onSettingsChanged(); }
     ));
+
+    // A controller readout. A pad does not exist to the browser until a button
+    // is pressed on it, so "not detected" is genuinely ambiguous and the row
+    // has to say what to do about it rather than just reporting a negative.
+    const { row, ctl } = this.row('Controller', 'A / ✕ resume · Y / △ end shift · Start pauses.');
+    const status = document.createElement('span');
+    status.className = 'num controller-status';
+    status.textContent = 'press a button';
+    ctl.appendChild(status);
+    this.controllerRow = status;
+    list.appendChild(row);
   }
 
   private row(name: string, sub: string): { row: HTMLElement; ctl: HTMLElement } {

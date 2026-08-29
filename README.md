@@ -36,6 +36,12 @@ GitHub Pages, Cloudflare Pages or a folder on a web server unchanged.
 **M** to mute, **T** for the bend tuner. On a phone it is the one on-screen
 joystick: horizontal steers, vertical is throttle and brake.
 
+**With a controller** — left stick steers, **RT** is throttle and **LT** is the
+brake (**A** and **B** work too, for pads with digital triggers). **Start**
+pauses, **X** mutes, **Y** opens the bend tuner. On the menus, the **D-pad**
+moves between modes and **A** confirms, so you never have to reach for the
+screen. The on-screen joystick hides itself once a pad is in use.
+
 Load three crates of melonpan at a bakery, then deliver them. Several orders
 are live at once, each with its own countdown; rival couriers are racing you for
 the same ones, and roadworks move around the city. Deliveries put time back on
@@ -98,6 +104,54 @@ A rule falls out of all this: **anything that must be legible in both regions
 needs a component built for each.** An objective has a tall pillar for the
 street and a flat ring for the map. A closure has bars across the carriageway
 and a flat X. A building has a facade and a roof tone that encodes its height.
+
+## Testing it on an iPad with a controller
+
+**Get it onto a URL.** The iPad needs to reach it over HTTPS, and the easiest
+route with no account and no config is a drag-and-drop static host:
+
+```bash
+npm run build          # produces dist/
+```
+
+Drop the `dist/` folder onto [Netlify Drop](https://app.netlify.com/drop) and
+you get an HTTPS URL immediately. Any other static host works the same way —
+`dist/` uses relative paths and has no server-side anything.
+
+For a faster iteration loop on the same wifi, `npm run dev -- --host` prints a
+LAN address the iPad can open directly. Fine for quick checks; use the deployed
+HTTPS build for anything you want to trust.
+
+**Install it to the home screen.** In Safari, Share → *Add to Home Screen*.
+Launched from the icon it runs without browser chrome, which is worth a
+surprising amount on a device this size — the manifest and the iOS-specific meta
+tags are already in place.
+
+**Pair the controller first**, in Settings → Bluetooth (Xbox, DualSense,
+Backbone and MFi pads all work). Then, on the title screen:
+
+1. **Tap the screen once.** This matters and is not obvious: a browser will not
+   start an AudioContext without a user gesture, and *a gamepad button does not
+   count as one*. Any tap anywhere unlocks the sound; without it you would drive
+   in silence with nothing to explain why.
+2. **Press a button on the pad.** Safari does not report a connected pad at all
+   until you do — it will not even fire `gamepadconnected`. The title screen
+   says so, and turns green with the pad's name once it sees it.
+
+If the pad is not being seen, pause and look at the **Controller** row on the
+pause screen: it shows the detected pad's name, or `press a button`, or flags a
+non-standard mapping.
+
+**What to look for**, since both of the project's open risks live on exactly
+this device:
+
+- **Motion sickness.** The speed-reactive bend is aggressive by design. If it
+  is uncomfortable, drop **Bend intensity** on the pause screen — 0 freezes the
+  projection completely, and somewhere in between is the interesting answer.
+- **Frame rate.** Vertex count is the constraint here, not fill rate, because
+  the bend runs per vertex. **City life** off removes traffic and pedestrians,
+  which is the biggest single lever. If it is still short of smooth, the next
+  levers are **Map scale** up and **Building height** down in the bend tuner.
 
 ## Layout
 

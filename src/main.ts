@@ -4,6 +4,7 @@ import { makeCar, stepVehicle, resetCar } from './vehicle/vehicle';
 import { collideBlocks } from './vehicle/collision';
 import { buildCar } from './vehicle/car-mesh';
 import { createJoystick, createKeyboard } from './ui/joystick';
+import { Gamepads, BTN } from './ui/gamepad';
 import { createTuner } from './ui/tuner';
 import { Hud } from './ui/hud';
 import { Screens } from './ui/screens';
@@ -38,6 +39,9 @@ const START_Z = nodePos(4);
 
 const stick = createJoystick(document.getElementById('stickL')!);
 const keyboard = createKeyboard();
+const pads = new Gamepads();
+// Polled on its own timer, so a quick tap is never lost to a slow frame.
+pads.startPolling();
 const tuner = createTuner(
   document.getElementById('tuner')!,
   document.getElementById('tuneBtn')!,
@@ -48,6 +52,7 @@ const sticksEl = document.getElementById('sticks')!;
 const topbarEl = document.getElementById('topbar')!;
 const muteBtn = document.getElementById('muteBtn')!;
 const pauseBtn = document.getElementById('pauseBtn')!;
+const padNote = document.getElementById('padNote');
 
 const screens = new Screens({
   onStart: startRun,
@@ -78,7 +83,9 @@ function syncMuteButton(): void {
 
 function setPlayingChrome(on: boolean): void {
   hud.show(on);
-  sticksEl.classList.toggle('on', on);
+  // The on-screen stick is dead weight once a controller is in play, and it
+  // sits right on top of the truck.
+  sticksEl.classList.toggle('on', on && !pads.inUse);
   topbarEl.classList.toggle('on', on);
   if (!on) tuner.close();
 }
@@ -162,6 +169,58 @@ document.addEventListener('visibilitychange', () => {
   else audio.resume();
 });
 
+/**
+ * Controller. Deliberately a small, fixed vocabulary rather than a focus model:
+ * on a screen there are only ever two or three things worth doing, and a pad
+ * that needs a cursor to press "Start shift" is worse than one that does not.
+ */
+function readGamepadUi(now: number): void {
+  pads.poll();          // belt and braces: the timer may be throttled in background
+
+  const st = pads.status;
+  const label = !st.connected ? 'press a button'
+    : st.standard ? shortPadName(st.id)
+    : `${shortPadName(st.id)} (non-standard)`;
+  screens.setControllerStatus(label);
+
+  if (padNote) {
+    const text = st.connected ? `\u2014 ${label} connected` : '\u2014 press a button on the pad to wake it';
+    if (padNote.textContent !== text) padNote.textContent = text;
+    padNote.parentElement?.classList.toggle('pad-live', st.connected);
+  }
+
+  switch (screens.open) {
+    case 'title': {
+      const step = pads.menuStep(now);
+      if (step) screens.cycleMode(step);
+      if (pads.pressed(BTN.A) || pads.pressed(BTN.START)) startRun(screens.mode);
+      return;
+    }
+    case 'pause':
+      if (pads.pressed(BTN.A) || pads.pressed(BTN.START)) resume();
+      else if (pads.pressed(BTN.Y)) { game.end(); showResults(); }
+      return;
+    case 'result':
+      if (pads.pressed(BTN.A) || pads.pressed(BTN.START)) startRun(game.mode);
+      else if (pads.pressed(BTN.B)) toMenu();
+      return;
+    default:
+      if (pads.pressed(BTN.START) || pads.pressed(BTN.SELECT)) pause();
+      if (pads.pressed(BTN.X)) { save.settings.muted = !save.settings.muted; applySettings(); }
+      if (pads.pressed(BTN.Y)) tuner.toggle();
+      // Hide the touch stick the first time the pad is actually used.
+      if (pads.inUse && sticksEl.classList.contains('on')) sticksEl.classList.remove('on');
+  }
+}
+
+/** "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e...)" is not a label. */
+function shortPadName(id: string): string {
+  const cut = id.replace(/\s*\((?:STANDARD GAMEPAD|Vendor|Product).*$/i, '').trim();
+  // Trimmed generously and left to CSS to ellipsis, so the useful part of an
+  // unusual pad's name survives instead of being chopped mid-word.
+  return (cut || id).slice(0, 44);
+}
+
 // ---------- loop ----------
 let last = performance.now();
 
@@ -176,8 +235,14 @@ function tick(now: number): void {
   const live = game.phase === 'playing';
   let throttle = 0;
 
+  readGamepadUi(now);
+
   if (live) {
-    const { thr, str } = keyboard.read(stick);
+    const k = keyboard.read(stick);
+    // Whichever input is being pushed hardest wins, so a controller and the
+    // touch stick can coexist without either having to be "selected".
+    const thr = Math.abs(pads.throttle) > Math.abs(k.thr) ? pads.throttle : k.thr;
+    const str = Math.abs(pads.steer) > Math.abs(k.str) ? pads.steer : k.str;
     throttle = thr;
 
     // Three substeps: the springs are stiff and one big step goes unstable.
@@ -189,7 +254,10 @@ function tick(now: number): void {
       impact = Math.max(impact, collideBlocks(car, blocks));
     }
     car.impact = impact;
-    if (impact > 6) world.chase.addKick(Math.min(1.6, impact * 0.06));
+    if (impact > 6) {
+      world.chase.addKick(Math.min(1.6, impact * 0.06));
+      pads.rumble(90 + impact * 4, Math.min(1, impact / 22));
+    }
 
     const ev = game.update(dt, car);
     carMesh.setCargo(game.crates);
@@ -199,12 +267,13 @@ function tick(now: number): void {
       hud.flash(false);
       world.chase.addKick(0.5);
       audio.delivered(game.multiplier);
+      pads.rumble(140, 0.35);
     }
     if (ev.restocked) audio.restocked();
     if (ev.expired) audio.expired();
     if (ev.snipedNow) audio.sniped();
     if (ev.scattered > 0) audio.scattered();
-    if (ev.lost || ev.scattered > 0) hud.flash(true);
+    if (ev.lost || ev.scattered > 0) { hud.flash(true); pads.rumble(200, 0.5); }
     for (const m of game.messages.splice(0)) hud.toast(m.text, m.bad);
     audio.clock(game.clock, game.mode.duration === 0);
 
@@ -243,6 +312,27 @@ function tick(now: number): void {
   world.setFrame(car.x, car.z, projection.aLag);
   world.cullTiles(car.x, car.z, projection.aLag);
   world.render();
+
+  pads.endFrame();
+}
+
+/* AUDIO UNLOCK. A browser will not start an AudioContext without a user
+   gesture — and a GAMEPAD BUTTON DOES NOT COUNT as one. So a player who pairs a
+   controller and never touches the screen would drive in silence forever, with
+   nothing to suggest why.
+
+   Any real gesture anywhere on the page therefore starts the audio, whether or
+   not it was the Start button. Once it is running these listeners remove
+   themselves. */
+function unlockAudio(): void {
+  audio.begin(save.settings.volume, save.settings.muted);
+  audio.resume();
+  for (const ev of ['pointerdown', 'touchend', 'keydown'] as const) {
+    removeEventListener(ev, unlockAudio);
+  }
+}
+for (const ev of ['pointerdown', 'touchend', 'keydown'] as const) {
+  addEventListener(ev, unlockAudio, { passive: true });
 }
 
 // ---------- go ----------

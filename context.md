@@ -688,6 +688,37 @@ Things worth keeping from doing it:
 Verified by measuring real RMS on the master bus across idle, power, cornering,
 pause and mute, rather than by assuming the graph was connected.
 
+## Controllers (29 Aug)
+
+Added for testing on an iPad with a pad paired over Bluetooth. Left stick
+steers, RT/LT are throttle and brake, A/B cover pads with digital triggers,
+D-pad and A drive the menus so you never have to reach for the screen.
+
+Three things about the Gamepad API that all bit, and are worth remembering
+because none of them produce an error:
+
+1. **The pad does not exist until you press something.** Safari will not report
+   a connected pad, and will not fire `gamepadconnected`, until a button is
+   pressed on it. So the UI cannot say "no controller found" — it has to say
+   "press a button", which is what the title screen and the pause row now do.
+2. **A GAMEPAD BUTTON IS NOT A USER GESTURE.** A player who pairs a pad and
+   never touches the screen would never unlock the AudioContext and would drive
+   in total silence with nothing to explain it. Any real tap anywhere on the
+   page now starts the audio, whether or not it was the Start button.
+3. **Polling must not live in the render loop.** There is no input event to
+   subscribe to — the API is poll-only — so tying it to frames means a quick tap
+   can fall entirely between two of them the moment the frame rate dips. A menu
+   button that works at 60fps and not at 15 is a horrible thing to debug. It
+   polls on its own 60Hz timer and latches presses; the frame consumes them.
+
+Found (3) immediately, because the software renderer in the test harness runs at
+about two frames a second, which turned out to be an excellent accidental
+stress test of exactly this.
+
+Triggers are buttons 6 and 7 with an analogue `.value` under the standard
+mapping, not axes — reading them as axes gets you nothing on the controllers
+people actually own.
+
 ## Performance (28 Aug)
 
 The stated risk was vertex count, and it was real: a bigger, more varied city
