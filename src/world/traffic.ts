@@ -1,4 +1,5 @@
-import { GRID, PITCH, nodePos, wrap, wrapDelta, wrapDist } from '../core/city-layout';
+import { GRID, PITCH, nodePos } from '../core/city-layout';
+import { wrap, wrapDelta, wrapDist } from '../core/place';
 import { edgeKey } from './network';
 import type { Block } from '../render/city';
 import type { Builder } from '../render/builder';

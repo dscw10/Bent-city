@@ -1,6 +1,7 @@
 import { RoadNetwork } from './network';
 import type { Point } from './network';
-import { wrapDelta, wrapDist, TILE } from '../core/city-layout';
+import { TILE } from '../core/city-layout';
+import { wrapDelta, wrapDist } from '../core/place';
 import { approachAngle } from '../core/math';
 import type { Dispatch, Order } from '../game/dispatch';
 

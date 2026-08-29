@@ -49,8 +49,15 @@ export interface Settings {
 
 export interface SaveData {
   settings: Settings;
-  /** Best score per mode id. */
+  /** Best score per mode id. Higher is better. */
   best: Record<string, number>;
+  /**
+   * Best TIME per mode id, in seconds. Kept apart from `best` rather than
+   * negated into it, because lower-is-better and higher-is-better cannot share
+   * a "beat the previous number" comparison without one of them lying on the
+   * results screen.
+   */
+  bestTime: Record<string, number>;
   /** Total deliveries ever, purely for the title screen. */
   totalDeliveries: number;
 }
@@ -68,6 +75,7 @@ const DEFAULTS: SaveData = {
     bend: { ...DEFAULT_BEND }
   },
   best: {},
+  bestTime: {},
   totalDeliveries: 0
 };
 
@@ -80,6 +88,7 @@ function read(): SaveData {
       settings: { ...DEFAULTS.settings, ...parsed.settings,
         bend: { ...DEFAULT_BEND, ...parsed.settings?.bend } },
       best: { ...parsed.best },
+      bestTime: { ...parsed.bestTime },
       totalDeliveries: parsed.totalDeliveries ?? 0
     };
   } catch {
@@ -112,6 +121,15 @@ export function recordScore(modeId: string, score: number): boolean {
   const prev = save.best[modeId] ?? 0;
   if (score <= prev) return false;
   save.best[modeId] = score;
+  persist();
+  return true;
+}
+
+/** Same, for a run whose score is a time and where lower wins. */
+export function recordTime(modeId: string, seconds: number): boolean {
+  const prev = save.bestTime[modeId];
+  if (prev !== undefined && seconds >= prev) return false;
+  save.bestTime[modeId] = seconds;
   persist();
   return true;
 }

@@ -1,6 +1,7 @@
 import { P } from '../core/config';
 import { terrainAt, slopeAt } from '../core/terrain';
-import { wrap, onOffroad, nodePos } from '../core/city-layout';
+import { nodePos } from '../core/city-layout';
+import { wrap, PLACE } from '../core/place';
 import { clamp, lerp, shortAngle } from '../core/math';
 
 /**
@@ -332,7 +333,7 @@ export function stepVehicle(car: Car, h: number, thr: number, str: number, drift
   const fx = sa, fz = ca;      // forward
   const lx = ca, lz = -sa;     // left
 
-  const off = onOffroad(car.x, car.z);
+  const off = PLACE.offroad(car.x, car.z);
   car.offroad = off;
   const mu = V.mu * (off ? 0.66 : 1);
 

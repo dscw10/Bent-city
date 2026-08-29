@@ -23,14 +23,32 @@
  * to write.
  */
 
-/** Terrain, shared verbatim between the shader and `core/terrain.ts`. */
+/**
+ * Terrain, shared verbatim between the shader and `core/terrain.ts`.
+ *
+ * Two shapes now, chosen by `uTerrMode`: the city's periodic hills and the
+ * pass's carved valley. A uniform branch, so every vertex in a draw takes the
+ * same path and it costs nothing — and one shader rather than two variants,
+ * which means there is exactly one place for the two to drift apart instead of
+ * two. The pass half lives in core/pass-shape.ts next to its TypeScript twin,
+ * because keeping them in the same file is the only thing that has ever made
+ * anyone remember to change both.
+ */
+import { PASS_GLSL } from '../core/pass-shape';
+
 export const TERRAIN_GLSL = /* glsl */ `
+  ${PASS_GLSL}
+
   // MUST match terrainAt() in core/terrain.ts exactly, or the truck drives on a
   // ghost surface: the geometry says one height, the suspension says another.
-  float terrainAt(vec2 p){
+  float cityTerrain(vec2 p){
     return uTerr.x * sin(uTK*p.x)         * cos(uTK*p.y)
          + uTerr.y * sin(2.0*uTK*p.x+1.7) * sin(uTK*p.y+0.4)
          + uTerr.z * cos(3.0*uTK*p.x)     * cos(2.0*uTK*p.y+2.1);
+  }
+
+  float terrainAt(vec2 p){
+    return uTerrMode > 0.5 ? passTerrain(p) : cityTerrain(p);
   }`;
 
 export const BEND_GLSL = /* glsl */ `
@@ -129,6 +147,9 @@ export const BENT_VERT = /* glsl */ `
   uniform mat4 uP2W;      // and back again, for locally-authored meshes
   uniform float uLocal;   // 1.0 if this mesh is authored in player-local space
   uniform float uZ0, uR, uKmin, uFlat, uEase, uFallA, uBuildH, uPhiMax;
+  uniform float uTerrMode, uGroundY;
+  uniform vec3 uPassA, uPassB, uPassC;   // sway amplitudes, wavenumbers, phases
+  uniform vec4 uPassD, uPassE;           // climb, corridor and wall shape
   uniform float uDelta, uRampA, uRampB, uFogStart, uFogEnd;
   uniform vec2 uBendEnd;  // where the fold ends, integrated on the CPU
   uniform vec3 uTerr;     // hill amplitudes
@@ -178,7 +199,20 @@ export const BENT_VERT = /* glsl */ `
     // the shadows swim around as you turn.
     vN = normalize(mat3(modelMatrix) * normal);
 
-    gl_Position = projectionMatrix * viewMatrix * vec4(bend(local, uZ0, uR), 1.0);
+    /* THE FOLD MEASURES HEIGHT FROM THE PLAYER'S GROUND, NOT FROM SEA LEVEL.
+       Player-local space keeps world Y, so local.y is an absolute altitude,
+       and the flatten in bend() squashes it toward zero. In the city, where the
+       hills are ±10, nobody could see the difference. On a pass that climbs 90
+       metres to a summit it is fatal: stand at the top and the map region
+       flattens the road ahead down to sea level, so the whole far half of the
+       view drops through the mountain. Subtracting the ground under the truck
+       first, and adding it back after, makes the map settle at the height you
+       are actually standing at. It is a no-op for the near field either way. */
+    vec3 rel  = vec3(local.x, local.y - uGroundY, local.z);
+    vec3 bent = bend(rel, uZ0, uR);
+    bent.y += uGroundY;
+
+    gl_Position = projectionMatrix * viewMatrix * vec4(bent, 1.0);
   }`;
 
 export const BENT_FRAG = /* glsl */ `

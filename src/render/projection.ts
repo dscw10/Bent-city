@@ -55,7 +55,12 @@ export class Projection {
     const spd = Math.min(1, Math.abs(car.v) / P.vMax);
     this.resp = smoothstep(spd);
 
-    const accel = clamp((car.v - this.prevV) / (dt * 34), 0, 1);
+    /* Guarded against a zero-length frame. Two rAF callbacks can report the
+       same timestamp — it happens on the first frame after a resume, and
+       routinely in a headless renderer — and 0/0 is NaN, which clamp passes
+       straight through into uZ0 and leaves the fold start NaN for the rest of
+       the session. Nothing draws wrong; the bend simply stops. */
+    const accel = dt > 0 ? clamp((car.v - this.prevV) / (dt * 34), 0, 1) : 0;
     this.prevV = car.v;
 
     const push = P.push * this.intensity;

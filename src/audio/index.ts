@@ -45,7 +45,7 @@ export class GameAudio {
   /** Per-frame. `active` is false while paused or on a menu. */
   update(
     dt: number, car: Car, throttle: number, active: boolean,
-    rivals: Rival[], traffic: Traffic,
+    rivals: Rival[], traffic: Traffic | null,
     music: { speed: number; urgency: number; intensity: number }
   ): void {
     if (!this.audio.ready) return;
@@ -92,12 +92,18 @@ export class GameAudio {
     }
   }
 
-  /** Mix inputs, derived in one place so the music and the HUD agree. */
-  static musicState(speed: number, clock: number, duration: number, streak: number) {
+  /**
+   * Mix inputs, derived in one place so the music and the HUD agree.
+   *
+   * `intensity` is whatever the current game says drama is: a delivery combo in
+   * the city, how far up the pass you have got on the mountain. The music does
+   * not need to know which.
+   */
+  static musicState(speed: number, clock: number, duration: number, intensity: number) {
     return {
       speed: clamp(Math.abs(speed) / P.vMax, 0, 1),
       urgency: duration > 0 ? clamp(1 - clock / Math.min(45, duration), 0, 1) : 0,
-      intensity: clamp(streak / 9, 0, 1)
+      intensity: clamp(intensity, 0, 1)
     };
   }
 }

@@ -1,5 +1,4 @@
-import type { Order } from '../game/dispatch';
-import { wrapDist } from '../core/city-layout';
+import type { HudView, Slot } from '../game/rules';
 
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const e = document.getElementById(id);
@@ -16,11 +15,19 @@ const mmss = (t: number): string => {
  * The HUD is deliberately quiet. The projection is what you are meant to be
  * reading; text on top of it is a fallback, not the interface.
  *
- * The one exception is the ORDER MANIFEST down the left edge. It is the textual
- * half of the same information the map shows spatially — the map tells you
- * where the orders are and who is racing you for them, the manifest tells you
- * exactly how long each has left. Neither is much use alone. Reading them
- * together, and deciding an order to serve them in, is the game.
+ * The one exception is the COLUMN down the left edge. It is the textual half of
+ * the same information the map shows spatially, and each place fills it with
+ * its own half of that pairing:
+ *
+ *   - in the city it is the order manifest. The map tells you where the drops
+ *     are and who is racing you for them; the column tells you exactly how long
+ *     each has left. Neither is much use alone, and reading them together is
+ *     the game.
+ *   - on the pass it is the pace notes. The map tells you the SHAPE of the road
+ *     ahead; the column tells you the grade and the distance to each corner.
+ *
+ * The HUD knows about neither. It renders `Slot`s — a tag, a value, a sort
+ * order and a couple of highlight flags — and the rules decide what they mean.
  */
 export class Hud {
   private readonly root = el('hud');
@@ -35,7 +42,7 @@ export class Hud {
   private readonly toastEl = el('toast');
   private readonly flashEl = el('flash');
 
-  private rows = new Map<number, HTMLElement>();
+  private rows = new Map<string, HTMLElement>();
   private toastTimer = 0;
   private lastClockText = '';
 
@@ -62,16 +69,21 @@ export class Hud {
     this.clockBar.style.transform = `scaleX(${frac})`;
   }
 
-  setScore(yen: number, multiplier: number, streak: number): void {
-    this.score.textContent = yen.toLocaleString('en-GB');
-    this.combo.innerHTML = multiplier > 1
-      ? `<span class="accent">&times;${multiplier}</span> &middot; ${streak} in a row`
-      : '&nbsp;';
+  /** Everything a live frame needs, in one call. */
+  setView(v: HudView): void {
+    this.setClock(v.clock, v.clockTotal, v.endless);
+    if (this.score.textContent !== v.score) this.score.textContent = v.score;
+    if (this.combo.innerHTML !== v.sub) this.combo.innerHTML = v.sub;
+    if (this.what.innerHTML !== v.task) this.what.innerHTML = v.task;
+    const d = v.distance === null ? '—' : `${Math.round(v.distance)} M`;
+    if (this.dist.textContent !== d) this.dist.textContent = d;
+    this.setSlots(v.slots);
   }
 
-  setTask(text: string, distance: number | null): void {
-    if (this.what.innerHTML !== text) this.what.innerHTML = text;
-    this.dist.textContent = distance === null ? '—' : `${Math.round(distance)} M`;
+  /** Label above the big number: what the run is actually scored on. */
+  setScoreLabel(text: string): void {
+    const el = document.getElementById('scoreLabel');
+    if (el && el.textContent !== text) el.textContent = text;
   }
 
   /**
@@ -84,38 +96,33 @@ export class Hud {
    * the whole manifest sat at opacity 0 and looked like a bug in the game logic
    * rather than in three lines of CSS.
    */
-  setOrders(orders: Order[], carX: number, carZ: number, canDeliver: boolean): void {
-    const seen = new Set<number>();
-    const sorted = [...orders].sort((a, b) =>
-      wrapDist(a.x, a.z, carX, carZ) - wrapDist(b.x, b.z, carX, carZ));
+  private setSlots(slots: Slot[]): void {
+    const seen = new Set<string>();
+    const sorted = [...slots].sort((a, b) => a.order - b.order);
 
     for (let i = 0; i < sorted.length; i++) {
-      const o = sorted[i];
-      seen.add(o.id);
-      let row = this.rows.get(o.id);
+      const s = sorted[i];
+      seen.add(s.key);
+      let row = this.rows.get(s.key);
       if (!row) {
         row = document.createElement('div');
         row.className = 'order';
         row.innerHTML = '<i class="pip"></i><span class="tag"></span><span class="t"></span>';
-        this.rows.set(o.id, row);
+        this.rows.set(s.key, row);
         this.manifest.appendChild(row);
       }
       const order = String(i);
       if (row.style.order !== order) row.style.order = order;
 
-      const contested = o.claimedBy >= 0;
-      row.classList.toggle('mine', canDeliver && !contested);
-      row.classList.toggle('contested', contested);
+      row.classList.toggle('mine', !!s.live && !s.contested);
+      row.classList.toggle('contested', !!s.contested);
 
-      const d = Math.round(wrapDist(o.x, o.z, carX, carZ));
       const tag = row.querySelector<HTMLElement>('.tag')!;
-      const label = `${o.hot ? '★ ' : ''}${d} m`;
-      if (tag.textContent !== label) tag.textContent = label;
+      if (tag.textContent !== s.tag) tag.textContent = s.tag;
 
       const t = row.querySelector<HTMLElement>('.t')!;
-      const text = o.life > 0 ? mmss(o.remaining) : '—';
-      if (t.textContent !== text) t.textContent = text;
-      t.classList.toggle('urgent', o.life > 0 && o.remaining < 12);
+      if (t.textContent !== s.value) t.textContent = s.value;
+      t.classList.toggle('urgent', !!s.urgent);
     }
 
     for (const [id, row] of this.rows) {

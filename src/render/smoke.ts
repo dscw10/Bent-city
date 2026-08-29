@@ -3,7 +3,7 @@ import type { Car } from '../vehicle/vehicle';
 import { WHEELS } from '../vehicle/vehicle';
 import { P } from '../core/config';
 import { clamp, lerp } from '../core/math';
-import { wrapDist, nearCopy, wrap } from '../core/city-layout';
+import { wrapDist, nearCopy, wrap } from '../core/place';
 
 /**
  * Tyre smoke.

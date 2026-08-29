@@ -210,11 +210,13 @@ Working:
   to open question #3
 - Traffic and pedestrians
 - Turn arrows painted at the junction you are about to reach
-- Three modes: Evening shift, Rush hour, Free roam
+- **Two places, two games**: the city (deliveries) and the Kaidō pass (a timed
+  run whose plan region is rally pace notes rather than a map)
+- Five modes: Evening shift, Rush hour, Free roam, The climb, Recce
 - Title, pause, results, restart, settings, best scores — no refreshing to replay
 - Full synthesised audio: layered engine, tyre and surface noise, panned rivals,
   four-stem adaptive music
-- 42 headless tests over the rules, the physics and collision
+- 118 headless tests over the rules, the physics, collision and the pass
 
 Not built yet:
 - Any handling nuance beyond what is there — the truck is good, not finished
@@ -227,12 +229,14 @@ Phase 0 is done. `bent-city.html` is kept as the historical prototype and is no
 longer the game; the game is a Vite + TypeScript application under `src/`.
 
 ```
-core/     layout, terrain, palette, maths, projection tuning
-render/   bend shader, geometry builder, city, block archetypes, materials,
-          marker batching, chase camera, projection state
+core/     city layout, pass shape, terrain, place (wrap + off-road),
+          palette, maths, projection tuning
+render/   bend shader, geometry builder, city, pass scenery, block archetypes,
+          materials, marker batching, chase camera, projection state
 vehicle/  raycast suspension, collision, truck mesh
-world/    routing graph, rivals, traffic, pedestrians
-game/     dispatch, modes, run state machine, persistence
+world/    road network + its generators, rivals, traffic, pedestrians
+game/     levels, rules (delivery / pass run), dispatch, pace notes, modes,
+          run shell, persistence
 audio/    bus graph, engine, world sound, music, one-shots
 ui/       HUD, screens, joystick, bend tuner, stylesheet
 ```
@@ -796,6 +800,135 @@ generator regardless, and the shared part is the graph underneath.
 `Level` in `game/levels.ts` is the shape a second place slots into — network,
 wrap size, off-road test, spawn, and a `build()` that makes the scenery. Only
 the city implements it so far.
+
+## The mountain pass (29 Aug)
+
+Chris chose **a different game per place**, and this is the second place. Five
+kilometres of one road up a valley and back down, against a clock only the
+checkpoints refill.
+
+### What the plan region does when there is no route to choose
+
+This is the whole reason the pass exists rather than a second city.
+
+In the city the map answers a ROUTING question: four drops are live, each with a
+countdown, and the game is deciding an order to serve them in. A pass has one
+road. Put a map above it and you get a stripe of nothing.
+
+So the plan region carries the co-driver's information instead — **what the road
+is about to do**. The route ahead is drawn as a ribbon coloured by corner grade,
+rally-style: 1 is the tightest, 6 is barely a bend. You can see a red stretch
+nine hundred metres up the valley at the same time as your own bonnet, and the
+decision it asks for (lift now, or carry it in) is one you genuinely cannot make
+from a street-level view.
+
+Every note keeps the rule the projection has imposed on everything since the
+first destination marker: **anything legible in both regions needs a component
+built for each.** A corner has a board painted flat across the road, which is
+the half that survives onto the map, and a board on a post out on the verge,
+which is the half you see coming.
+
+Three details that turned out to matter:
+
+- **The ribbon fades in across the fold.** Drawn full width to the bumper it
+  lays a solid colour over the piece of road you are actually driving on and
+  hides the paint and the kerbs. It is a plan-region mark; the near field is
+  already answering "what is this corner" with the painted board.
+- **Rungs, not a gradient.** A corner board is `7 − grade` bars across the road.
+  Countable beats continuous at map scale, for the same reason the order
+  countdown is a ring of ticks rather than a smooth arc.
+- **Grades were calibrated against this road, not from a table.** Its forty
+  corners run from a 59m radius to about 250m. Generic thresholds graded nearly
+  half of them a 2 — and a warning that fires on half the corners is a
+  background colour, not a warning. The boundaries now put three corners in
+  grade 1 and four in grade 2.
+
+### The road is one equation
+
+The centreline is a sum of three sines in z (`core/pass-shape.ts`). Everything
+else is derived from it, which is what keeps four separate systems from
+disagreeing about where the road is:
+
+- **the terrain** is `floor(z) + wall(distance from the centreline)`, so the
+  vertex shader can evaluate it in closed form;
+- **the road network** is samples of the same curve;
+- **the pace notes** come from differentiating it, not from measuring geometry
+  that might have drifted;
+- **the off-road test** is the same distance function with a threshold.
+
+The sway amplitudes are bounded on purpose. Perpendicular distance is
+approximated as `|x − S(z)| / √(1+S′²)`, which is first-order and degrades as
+the road turns away from the axis, so |S′| is kept under about 1.5 — corners up
+to 55°. **That means no true hairpins**, which is the one thing the pass was
+originally supposed to have. A real hairpin needs the corridor measured against
+the polyline, which the shader cannot do cheaply; it is the obvious next piece
+of work up here. The tightest corner as built is a 60m radius, which at cruising
+speed is a committed corner rather than a kink.
+
+There is **no armco**. The valley wall is quadratic out to 80m and reaches a
+gradient of about 1.5, so gravity's along-slope component is 15 m/s² against
+roughly 9 the tyres can put down: the hill throws you back. A continuous barrier
+would have needed a collision footprint every three metres for five kilometres,
+which is more collision geometry than the entire city has. Going off should cost
+you the corner, not end the run. There is a test that drives straight at the
+wall flat out and asserts you never top the ramp.
+
+### Two bugs the screenshots found, not the tests
+
+- **The whole valley was lit from underneath.** `Builder.quad` derives the face
+  normal from the corner order, and the ground strips were wound the opposite
+  way round from `slab`. The material is double-sided, so everything DREW — it
+  was simply a third as bright as the city and read as permanent shadow. Winding
+  is invisible until you look at the lighting.
+- **The fold flattened height toward SEA LEVEL.** Player-local space keeps world
+  Y, so `local.y` is an absolute altitude and the flatten in `bend()` squashes it
+  toward zero. In the city, where the hills are ±10, nobody could see it. On a
+  pass that climbs 90 metres it is fatal: stand at the summit and the far half of
+  the view drops through the mountain. Fixed with `uGroundY` — the bend now
+  measures height from the ground under the truck and adds it back afterwards,
+  which is a no-op for the near field and for the city.
+
+### Splitting the rules
+
+`game/game.ts` used to BE the delivery game. It is now a shell, and the line
+between it and `game/rules.ts` is worth being precise about, because it is not
+obvious:
+
+- anything that would have to be answered differently on a pass went into
+  **Rules** — what the objective is, what the HUD says, what counts as a score,
+  what gets drawn on the world;
+- anything that is the same question either way stayed in the **shell** — are we
+  playing, what can the truck hit, where do toasts go.
+
+`DeliveryRules` is the old game moved intact. `PassRules` is the new one. The
+HUD renders `Slot`s — a tag, a value, a sort order, two highlight flags — so the
+left-hand column is the order manifest in the city and the pace notes on the
+pass without the HUD knowing which.
+
+`core/place.ts` does the same job one level down, for physics and audio. Two
+facts about "wherever we are" turn out to differ: **does the world wrap** (fold a
+pass and driving off the summit puts you back on the start line at 90km/h) and
+**what counts as off the road**. `Level.use()` sets those two plus the CPU
+terrain and the shader's copy of it — four things that must always move
+together, and the reason they are one method.
+
+### Numbers
+
+- 5200m of valley, about 6100m of road, 40 corners, 9 checkpoints
+- The climb: 70 seconds on the clock, 22 back per gate
+- Twenty drawn chunks; seven to fifteen visible, 270k–400k vertices a frame
+  against the city's 1.4M
+
+### Still open on the pass
+
+- **No hairpins**, as above.
+- **Nothing else is on the road.** Traffic is still lattice-bound and a pass
+  wants a different mover entirely — an oncoming van on a blind corner is the
+  obvious one, and it is exactly the kind of thing a pace note should warn you
+  about.
+- **The non-grid city is still not built.** Chris asked for both; the pass came
+  first because it needed the road network more. `render/city.ts` still
+  generates from grid arithmetic.
 
 ## Mario Kart drift, tyre smoke, traffic off (29 Aug)
 
@@ -1363,7 +1496,7 @@ caching, the phone performance pass and anything Steam-shaped are not.*
 ## Files
 
 - `src/` — the game. See the module map under "Current state" above.
-- `tests/` — 42 headless tests over the rules, the physics and collision.
+- `tests/` — 118 headless tests over the rules, the physics, collision and the pass.
 - `bent-city.html` — the original single-file prototype, kept as the historical
   record of where the bend came from. **It is no longer the game** and does not
   receive changes; open it to see what v0.7 looked like, not to play.

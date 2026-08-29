@@ -156,3 +156,115 @@ export function drawTurnArrow(
     b.slabRot(ax, az, 3.6, 3.6, 0.14, head + Math.PI / 4, col, 1);
   }
 }
+
+/* ===================== the mountain pass =====================
+ *
+ * The pass's marks follow the same two-component rule as the city's, and it
+ * bites harder here because there is no street furniture to fall back on. Every
+ * one of these is a pair: something with height for the near field, and
+ * something flat for the map.
+ */
+
+/** Grade 1 is a corner you brake hard for; grade 6 is barely a bend. */
+export function gradeColour(grade: number): RGB {
+  if (grade <= 2) return C.rival;
+  if (grade <= 4) return C.hazard;
+  if (grade === 5) return C.melon;
+  return C.matcha;
+}
+
+/**
+ * The route ribbon, coloured per segment.
+ *
+ * This is the pass's version of the city's route: it is not telling you WHERE
+ * to go — there is only one road — it is telling you what the road is about to
+ * do. Reading a red stretch four hundred metres up the valley and lifting for
+ * it is the whole game, and it only exists because the fold puts that stretch
+ * on screen at the same time as your own bonnet.
+ *
+ * WIDTH IS PER SEGMENT, and that is not a nicety. Drawn at full width all the
+ * way to the bumper it lays a solid colour over the piece of road you are
+ * actually driving on, hides the paint and the kerbs, and turns the near field
+ * into a stripe. It is a PLAN-REGION mark: the caller fades it up from nothing
+ * across the fold, so the street stays a street and the ribbon only exists
+ * where the ribbon is the point.
+ */
+export function drawGradedRibbon(
+  b: Builder, path: Point[], colours: RGB[], widths: number[]
+): void {
+  if (path.length < 2) return;
+  const Y = 0.14;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], c = path[i + 1];
+    const dx = c[0] - a[0], dz = c[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-3) continue;
+    const width = widths[i] ?? 5.4;
+    if (width < 0.05) continue;
+    const ux = dx / len, uz = dz / len;
+    const px = -uz * width / 2, pz = ux * width / 2;
+    const col = colours[i] ?? C.matcha;
+    const steps = Math.max(1, Math.round(len / 4));
+    for (let s = 0; s < steps; s++) {
+      const t0 = s / steps, t1 = (s + 1) / steps;
+      const A = [a[0] + dx * t0, a[1] + dz * t0];
+      const B = [a[0] + dx * t1, a[1] + dz * t1];
+      b.quad(
+        [A[0] - px, Y, A[1] - pz], [A[0] + px, Y, A[1] + pz],
+        [B[0] + px, Y, B[1] + pz], [B[0] - px, Y, B[1] - pz],
+        1, 1, col
+      );
+    }
+  }
+}
+
+/**
+ * A corner board: transverse rungs painted across the road at the corner's
+ * entry, one fewer as the corner gets faster.
+ *
+ * COUNTABLE rather than continuous, for the same reason the order countdown is
+ * a ring of ticks and not a smooth arc: at map scale a graded wedge is a
+ * smudge, and four rungs are still four rungs when they are six pixels long.
+ */
+export function drawCornerBoard(
+  b: Builder, x: number, z: number, heading: number, grade: number
+): void {
+  const col = gradeColour(grade);
+  const rungs = Math.max(1, 7 - grade);
+  const s = Math.sin(heading), c = Math.cos(heading);
+  for (let i = 0; i < rungs; i++) {
+    const d = i * 4.5;
+    b.slabRot(x + s * d, z + c * d, 15, 1.5, 0.19, heading, col, 3);
+  }
+}
+
+/**
+ * The near-field half of a note: a board on a post, on the OUTSIDE of the
+ * corner, planted well before the entry so it arrives in your peripheral vision
+ * at the moment you would be lifting.
+ *
+ * `inv` is 1/uBuildH — anything with a life-size height has to pre-divide,
+ * because the shader multiplies box heights by that uniform.
+ */
+export function drawNoteBoard(
+  b: Builder, x: number, z: number, grade: number, inv: number
+): void {
+  const col = gradeColour(grade);
+  b.box(x, z, 0.4, 3.4 * inv, 0.4, C.ink, C.ink, 2, -3 * inv);
+  b.box(x, z, 3.2, 2.0 * inv, 0.5, col, col, 2, 2.2 * inv);
+}
+
+/**
+ * A checkpoint or the finish: two pillars and a band across the road. The
+ * pillars are what you see coming; the band is what survives onto the map.
+ */
+export function drawGate(
+  b: Builder, x: number, z: number, heading: number, col: RGB, inv: number
+): void {
+  const s = Math.sin(heading), c = Math.cos(heading);
+  for (const side of [-1, 1]) {
+    b.box(x + c * side * 10, z - s * side * 10, 1.3, 11 * inv, 1.3, col, col, 2, -6 * inv);
+  }
+  b.slabRot(x, z, 21, 2.4, 0.21, heading, col, 4);
+  b.slabRot(x + s * 5, z + c * 5, 21, 1.0, 0.21, heading, col, 4);
+}

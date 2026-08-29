@@ -24,7 +24,18 @@ export const C = {
   ink:    [0.07, 0.09, 0.10] as RGB,
   rival:  [0.78, 0.34, 0.30] as RGB,   // rival couriers — the only warm red
   hazard: [0.86, 0.55, 0.22] as RGB,   // road closures
-  traffic:[0.62, 0.65, 0.70] as RGB    // other vehicles: deliberately mute
+  traffic:[0.62, 0.65, 0.70] as RGB,   // other vehicles: deliberately mute
+
+  /* The mountain pass. Same discipline as the city — pale, flat, almost
+     monochrome — so the two places read as one game rather than two. The
+     valley floor is the city's park green pushed a shade cooler; the rock is
+     the city's roof grey with the blue taken out of it, so a mountainside and
+     a rooftop are recognisably the same material family seen at two scales. */
+  verge:  [0.66, 0.74, 0.66] as RGB,   // grass either side of the carriageway
+  slope:  [0.74, 0.79, 0.73] as RGB,   // the lower valley sides
+  rock:   [0.84, 0.84, 0.82] as RGB,   // bare rock above the tree line
+  scree:  [0.90, 0.90, 0.88] as RGB,   // the tops, nearly paper
+  pine:   [0.44, 0.56, 0.44] as RGB    // conifers, the one dark note
 } as const;
 
 /** Side faces are shaded a touch darker so box edges read without an outline. */

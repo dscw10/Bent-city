@@ -9,10 +9,11 @@ import { Gamepads, BTN } from './ui/gamepad';
 import { createTuner } from './ui/tuner';
 import { Hud } from './ui/hud';
 import { Screens } from './ui/screens';
-import type { ResultRow } from './ui/screens';
+import type { HudView, RunOutcome } from './game/rules';
 import { Game } from './game/game';
 import type { Mode } from './game/modes';
-import { cityLevel } from './game/levels';
+import { LEVELS } from './game/levels';
+import type { Level } from './game/levels';
 import { save, applySavedBend, captureBend, persist } from './game/storage';
 import { P } from './core/config';
 import { uniforms } from './render/uniforms';
@@ -25,8 +26,7 @@ import { GameAudio } from './audio';
 
 applySavedBend();
 
-const level = cityLevel();
-const world = new World(document.getElementById('stage')!, level);
+const world = new World(document.getElementById('stage')!);
 const projection = new Projection();
 const car = makeCar();
 const carMesh = buildCar(world.scene);
@@ -34,12 +34,30 @@ const hud = new Hud();
 const game = new Game();
 const audio = new GameAudio();
 
-game.bind(level, world.city.blocks);
+/**
+ * The place currently loaded. Swapping it is four steps that must happen in
+ * this order, which is why it lives in one function rather than at the call
+ * sites: make the level, tell the WORLD it is that place (terrain, wrap and
+ * off-road all move together), build its scenery, then point the rules at it.
+ * Spawn last, because resetCar reads the terrain it is being placed on.
+ */
+let level!: Level;
+
+function loadLevel(id: string): void {
+  if (level && level.id === id) return;
+  level = LEVELS[id]();
+  level.use();
+  const scenery = world.load(level);
+  game.bind(level, scenery.blocks);
+}
+
+loadLevel('city');
 projection.intensity = save.settings.bendIntensity;
 
-/** Where a shift begins. The level decides. */
-const START_X = level.spawn.x;
-const START_Z = level.spawn.z;
+/** Put the truck on the current level's start. */
+function placeCar(): void {
+  resetCar(car, level.spawn.x, level.spawn.z, level.spawn.heading);
+}
 
 const touch = createTouchControls(document.getElementById('touch')!);
 const keyboard = createKeyboard();
@@ -78,7 +96,7 @@ function applySettings(): void {
   // silently failed to save before this.
   persist();
   syncMuteButton();
-  if (game.phase === 'playing' || game.phase === 'paused') game.refreshCityLife(car);
+  if (game.phase === 'playing' || game.phase === 'paused') game.refresh(car);
 }
 
 function syncMuteButton(): void {
@@ -98,13 +116,15 @@ function setPlayingChrome(on: boolean): void {
 function startRun(mode: Mode): void {
   // The Start button is the user gesture the AudioContext has been waiting for.
   audio.begin(save.settings.volume, save.settings.muted);
-  resetCar(car, START_X, START_Z, level.spawn.heading);
+  loadLevel(mode.level);
+  placeCar();
   projection.reset(car.a);
   world.chase.reset();
   world.smoke.clear();
   hud.clearOrders();
+  hud.setScoreLabel(mode.level === 'pass' ? 'Time' : 'Yen');
   game.start(mode, car);
-  carMesh.setCargo(game.crates);
+  carMesh.setCargo(0);
   screens.hideAll();
   setPlayingChrome(true);
   last = performance.now();
@@ -136,22 +156,10 @@ function toMenu(): void {
 
 function showResults(): void {
   audio.finish();
-  const s = game.stats;
-  const { previous, isBest } = game.commitScore();
-  const rows: ResultRow[] = [
-    { label: 'Delivered', value: String(s.deliveries) },
-    { label: 'Longest streak', value: String(s.bestStreak) },
-    { label: 'Expired', value: String(s.expired) },
-    { label: 'Beaten to it', value: String(s.sniped) },
-    {
-      label: 'Time on shift',
-      value: `${Math.floor(s.elapsed / 60)}:${String(Math.floor(s.elapsed % 60)).padStart(2, '0')}`
-    }
-  ];
-  if (isBest && previous > 0) {
-    rows.unshift({ label: 'Previous best', value: `¥${previous.toLocaleString('en-GB')}`, highlight: true });
-  }
-  screens.showResult(isBest ? 'New best shift' : 'Shift over', s.yen, rows);
+  // The rules formatted this — yen in the city, a time on the pass — because
+  // only they know which of those the run was ever scored on.
+  const out: RunOutcome = game.outcome();
+  screens.showResult(out.title, out.score, out.rows);
   setPlayingChrome(false);
 }
 
@@ -240,6 +248,8 @@ function tick(now: number): void {
 
   const live = game.phase === 'playing';
   let throttle = 0;
+  /** Everything the HUD needs, built once by whichever game is running. */
+  let view: HudView | null = null;
 
   readGamepadUi(now);
 
@@ -288,13 +298,16 @@ function tick(now: number): void {
     }
 
     const ev = game.update(dt, car);
-    carMesh.setCargo(game.crates);
     audio.impact(impact);
 
-    if (ev.delivered > 0) {
+    /* One frame's worth of "something happened". The city credits yen and the
+       pass credits seconds at a checkpoint — the same event as far as the
+       flash, the camera kick and the pad are concerned, which is why the field
+       is `scored` rather than `delivered` now. */
+    if (ev.scored > 0) {
       hud.flash(false);
       world.chase.addKick(0.5);
-      audio.delivered(game.multiplier);
+      audio.delivered(1 + Math.min(4, Math.floor(game.intensity * 5)));
       pads.rumble(140, 0.35);
     }
     if (ev.restocked) audio.restocked();
@@ -303,7 +316,10 @@ function tick(now: number): void {
     if (ev.scattered > 0) audio.scattered();
     if (ev.lost || ev.scattered > 0) { hud.flash(true); pads.rumble(200, 0.5); }
     for (const m of game.messages.splice(0)) hud.toast(m.text, m.bad);
-    audio.clock(game.clock, game.mode.duration === 0);
+
+    view = game.hud(car);
+    carMesh.setCargo(view.cargo);
+    audio.clock(view.clock, view.endless);
 
     if (game.phase === 'over') showResults();
   }
@@ -312,8 +328,9 @@ function tick(now: number): void {
 
   audio.update(
     dt, car, throttle, live,
-    game.rivals.list, game.traffic,
-    GameAudio.musicState(car.v, game.clock, game.mode?.duration ?? 0, game.stats.streak)
+    game.rivals, game.traffic,
+    GameAudio.musicState(
+      car.v, view?.clock ?? 0, game.mode?.duration ?? 0, game.phase === 'title' ? 0 : game.intensity)
   );
 
   // The projection and camera keep running while paused, so the world behind
@@ -321,12 +338,9 @@ function tick(now: number): void {
   projection.update(dt, car);
   world.chase.update(dt, car, projection.resp);
 
-  if (live) {
+  if (view) {
     hud.setSpeed(car.v);
-    hud.setClock(game.clock, game.mode.duration || 1, game.mode.duration === 0);
-    hud.setScore(game.stats.yen, game.multiplier, game.stats.streak);
-    hud.setOrders(game.dispatch.orders, car.x, car.z, game.crates > 0);
-    hud.setTask(game.taskText(), game.focusDistance(car));
+    hud.setView(view);
   }
 
   const marks = world.marks.begin();
@@ -341,7 +355,7 @@ function tick(now: number): void {
   world.movers.end();
 
   world.setFrame(car.x, car.z, projection.aLag);
-  world.cullTiles(car.x, car.z, projection.aLag);
+  world.cullChunks(car.x, car.z, projection.aLag);
   world.render();
 
   pads.endFrame();
@@ -369,7 +383,7 @@ for (const ev of ['pointerdown', 'touchend', 'keydown'] as const) {
 // ---------- go ----------
 addEventListener('resize', () => world.resize());
 world.resize();
-resetCar(car, START_X, START_Z, level.spawn.heading);
+placeCar();
 projection.reset(car.a);
 carMesh.setCargo(0);
 applySettings();
@@ -383,12 +397,26 @@ if (import.meta.env.DEV) {
   // headless browser is not a practical way to test the delivery chain.
   (window as unknown as Record<string, unknown>).__warp = () => {
     const f = game.focus(car);
-    resetCar(car, f.x, f.z, car.a);
+    if (f) resetCar(car, f.x, f.z, car.a);
     return f;
   };
-  // Wind the shift clock down, to reach the results screen without waiting.
+  // Wind the clock down, to reach the results screen without waiting.
   (window as unknown as Record<string, unknown>).__setClock = (s: number) => {
-    game.clock = s;
+    (game.game as unknown as { clock: number }).clock = s;
+  };
+  // Put the truck a given distance up the pass, for testing the far end of a
+  // five-kilometre road without driving all of it in a software renderer.
+  (window as unknown as Record<string, unknown>).__seek = (z: number) => {
+    const net = level.network;
+    const i = net.nearest(0, z);
+    const [x, zz] = net.position(i);
+    // Pointed along the road, not at whatever heading the truck happened to
+    // have — dropped in sideways it looks like a rendering fault rather than
+    // a teleport.
+    const j = Math.min(i + 1, net.nodes.length - 1);
+    const [nx, nz] = net.position(j);
+    resetCar(car, x, zz, Math.atan2(nx - x, nz - zz));
+    return [x, zz];
   };
 
   // Measures the real RMS on the master bus, so "is there actually sound"
@@ -409,45 +437,48 @@ if (import.meta.env.DEV) {
     return Math.sqrt(sum / buf.length);
   };
 
-  (window as unknown as Record<string, unknown>).__dbg = () => ({
-    phase: game.phase,
-    orders: game.dispatch.orders.length,
-    closures: game.dispatch.closures.length,
-    crates: game.crates,
-    rivals: game.rivals.list.map(r => [Math.round(r.x), Math.round(r.z), r.targetId]),
-    traffic: game.traffic.cars.length,
-    peds: game.pedestrians.list.length,
-    car: [Math.round(car.x), Math.round(car.z)],
-    heading: car.a,
-    stats: { ...game.stats, yen: game.stats.yen, clock: Math.round(game.clock) },
-    focus: game.focus(car),
-    routeLen: (game as unknown as { route: unknown[] }).route.length,
-    markVerts: world.marks.builder.p.length / 3,
-    moverVerts: world.movers.builder.p.length / 3,
-    audio: (audio as unknown as { audio: { ctx: AudioContext | null } }).audio.ctx?.state ?? 'none',
-    drawnVerts: world.scene.children
-      .filter((o): o is import('three').Mesh => (o as import('three').Mesh).isMesh && o.visible)
-      .reduce((n, m) => n + (m.geometry.getAttribute('position')?.count ?? 0), 0),
-    kinds: world.city.kinds.flat().reduce<Record<string, number>>(
-      (acc, k) => { acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
-    blocks: world.city.blocks.length,
-    visibleTiles: world.visibleTiles,
-    smoke: world.smoke.count,
-    traffic2: game.traffic.cars.length,
-    bend: { ...P },
-    car2: {
-      drifting: car.drifting, driftCharge: car.driftCharge,
-      boost: car.boost, v: car.v
-    },
-    uniforms: {
-      uZ0: uniforms.uZ0.value,
-      uR: uniforms.uR.value,
-      uKmin: uniforms.uKmin.value,
-      uEase: uniforms.uEase.value,
-      uPhiMaxDeg: uniforms.uPhiMax.value * 180 / Math.PI,
-      uFallA: uniforms.uFallA.value,
-      uBendEnd: [uniforms.uBendEnd.value.x, uniforms.uBendEnd.value.y],
-      uFogEnd: uniforms.uFogEnd.value
-    }
-  });
+  (window as unknown as Record<string, unknown>).__dbg = () => {
+    const r = game.game as unknown as Record<string, { orders?: unknown[]; closures?: unknown[]; crates?: number }>;
+    const d = r.dispatch;
+    return {
+      phase: game.phase,
+      level: level.id,
+      mode: game.mode?.id ?? null,
+      hud: game.phase === 'playing' ? game.hud(car) : null,
+      orders: d?.orders?.length ?? 0,
+      closures: d?.closures?.length ?? 0,
+      crates: d?.crates ?? 0,
+      rivals: game.rivals.map(rv => [Math.round(rv.x), Math.round(rv.z), rv.targetId]),
+      traffic: game.traffic?.cars.length ?? 0,
+      car: [Math.round(car.x), Math.round(car.z)],
+      heading: car.a,
+      focus: game.focus(car),
+      markVerts: world.marks.builder.p.length / 3,
+      moverVerts: world.movers.builder.p.length / 3,
+      audio: (audio as unknown as { audio: { ctx: AudioContext | null } }).audio.ctx?.state ?? 'none',
+      drawnVerts: world.scene.children
+        .filter((o): o is import('three').Mesh => (o as import('three').Mesh).isMesh && o.visible)
+        .reduce((n, m) => n + (m.geometry.getAttribute('position')?.count ?? 0), 0),
+      blocks: world.scenery.blocks.length,
+      chunks: `${world.visibleChunks}/${world.scenery.chunks.length}`,
+      smoke: world.smoke.count,
+      bend: { ...P },
+      car2: {
+        drifting: car.drifting, driftCharge: car.driftCharge,
+        boost: car.boost, v: car.v, offroad: car.offroad, y: car.y
+      },
+      uniforms: {
+        uZ0: uniforms.uZ0.value,
+        uR: uniforms.uR.value,
+        uKmin: uniforms.uKmin.value,
+        uEase: uniforms.uEase.value,
+        uTerrMode: uniforms.uTerrMode.value,
+        uGroundY: uniforms.uGroundY.value,
+        uPhiMaxDeg: uniforms.uPhiMax.value * 180 / Math.PI,
+        uFallA: uniforms.uFallA.value,
+        uBendEnd: [uniforms.uBendEnd.value.x, uniforms.uBendEnd.value.y],
+        uFogEnd: uniforms.uFogEnd.value
+      }
+    };
+  };
 }

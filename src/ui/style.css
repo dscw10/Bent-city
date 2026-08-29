@@ -203,6 +203,15 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;background:var(--matc
   font-variant-numeric:tabular-nums;margin-bottom:20px}
 
 .modes,.settings,.results{display:flex;flex-direction:column;gap:7px;margin-bottom:20px}
+/* The place picker. Two buttons side by side rather than another list: which
+   place you are in is a bigger choice than which mode, and it should not look
+   like one more row of the same thing. */
+.places{display:flex;gap:7px;margin-bottom:10px}
+.place{flex:1;padding:10px 12px;text-align:left;border:1.5px solid rgba(154,163,171,.55);
+  border-radius:11px;background:rgba(255,255,255,.45);cursor:pointer;transition:.16s}
+.place.sel{border-color:var(--ink);background:rgba(255,255,255,.85)}
+.place .name{display:block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;font-weight:700}
+.place .desc{display:block;font-size:11px;line-height:1.45;color:#5B646C;margin-top:4px}
 .mode{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;text-align:left;
   border:1.5px solid rgba(154,163,171,.55);background:transparent;cursor:pointer;
   font-family:inherit;color:var(--ink)}

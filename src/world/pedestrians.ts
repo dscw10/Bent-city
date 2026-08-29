@@ -1,4 +1,5 @@
-import { PITCH, ROADW, BLOCK, wrap, wrapDelta, wrapDist } from '../core/city-layout';
+import { PITCH, ROADW, BLOCK } from '../core/city-layout';
+import { wrap, wrapDelta, wrapDist } from '../core/place';
 import type { Builder } from '../render/builder';
 import type { RGB } from '../core/palette';
 import { shade } from '../core/palette';

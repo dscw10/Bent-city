@@ -4,7 +4,8 @@ import { Rivals } from '../src/world/rivals';
 import { findMode, MODES } from '../src/game/modes';
 import { RoadNetwork, edgeKey } from '../src/world/network';
 import { buildGridNetwork } from '../src/world/networks/grid';
-import { GRID, TILE, nodePos, wrapDelta, wrapDist, nearCopy, onOffroad, PITCH, ROADW } from '../src/core/city-layout';
+import { GRID, TILE, nodePos, onOffroad, PITCH, ROADW } from '../src/core/city-layout';
+import { wrapDelta, wrapDist, nearCopy } from '../src/core/place';
 import { terrainAt } from '../src/core/terrain';
 
 /**

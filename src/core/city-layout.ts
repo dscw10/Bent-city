@@ -1,11 +1,16 @@
 /**
- * The city's dimensions. Everything — geometry, routing, collision, traffic and
- * the audio's idea of where things are — reads these, so the grid can be
- * resized in one place.
+ * The city's dimensions. Everything about THE CITY — its geometry, its routing,
+ * its collision, its traffic — reads these, so the grid can be resized in one
+ * place.
  *
  * The city is one TILE, drawn 5×5 around the player. The player's position is
  * wrapped into the home tile every frame, so the surrounding copies never move:
  * no streaming, no pop-in, one shared geometry.
+ *
+ * Note what is NOT here any more: the wrap arithmetic itself. That moved to
+ * `core/place.ts` when a second location arrived, because a mountain pass has
+ * two ends and folding its coordinates would teleport you off the summit back
+ * onto the start line at full speed.
  */
 export const GRID = 9;                 // intersections per tile
 export const PITCH = 58;               // distance between intersections
@@ -17,41 +22,8 @@ export const TILES_ACROSS = 5;         // how many copies are drawn per axis
 /** World coordinate of intersection index i. */
 export const nodePos = (i: number): number => i * PITCH;
 
-/** Wrap a world coordinate into the home tile. */
-export const wrap = (v: number): number => ((v % TILE) + TILE) % TILE;
-
-/**
- * Shortest signed difference between two world coordinates, accounting for the
- * wrap. Without this, anything comparing positions across the tile seam — a
- * rival's distance to a drop, a traffic car's gap to the truck — reads as half
- * a city away when it is in fact right there.
- */
-export function wrapDelta(a: number, b: number): number {
-  let d = (a - b) % TILE;
-  if (d > TILE / 2) d -= TILE;
-  if (d < -TILE / 2) d += TILE;
-  return d;
-}
-
-/** Straight-line distance between two points, respecting the wrap. */
-export function wrapDist(ax: number, az: number, bx: number, bz: number): number {
-  return Math.hypot(wrapDelta(ax, bx), wrapDelta(az, bz));
-}
-
-/**
- * The copy of `v` nearest to `ref`, which may lie outside the home tile.
- *
- * Gameplay measures distance through the seam — an order 60m away across the
- * wrap really is 60m away. Markers therefore have to be DRAWN through the seam
- * too, on whichever copy of the city is nearest, or the HUD says 60m while the
- * beacon sits half a city away in the home tile.
- *
- * This does not contradict the rule that the route never wraps: the route is
- * still computed once, inside the home tile, and drawn once. It is only
- * positioned on the copy you are actually standing in. Terrain is periodic over
- * exactly one tile, so a marker moved by a whole tile lands at the same height.
- */
-export const nearCopy = (v: number, ref: number): number => ref + wrapDelta(v, ref);
+/** Fold into the home tile. Local to the city, which always wraps. */
+const cityWrap = (v: number): number => ((v % TILE) + TILE) % TILE;
 
 /**
  * True if (x,z) is inside a block footprint rather than on the carriageway —
@@ -62,8 +34,8 @@ export const nearCopy = (v: number, ref: number): number => ref + wrapDelta(v, r
  * survives the tile wrap automatically.
  */
 export function onOffroad(x: number, z: number): boolean {
-  const lx = wrap(x) % PITCH;
-  const lz = wrap(z) % PITCH;
+  const lx = cityWrap(x) % PITCH;
+  const lz = cityWrap(z) % PITCH;
   return lx > ROADW / 2 && lx < PITCH - ROADW / 2 &&
          lz > ROADW / 2 && lz < PITCH - ROADW / 2;
 }

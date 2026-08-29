@@ -1,7 +1,7 @@
 import type { Audio } from './audio';
 import type { Rival } from '../world/rivals';
 import type { Traffic } from '../world/traffic';
-import { nearCopy, wrapDist } from '../core/city-layout';
+import { nearCopy, wrapDist } from '../core/place';
 import { terrainAt } from '../core/terrain';
 import { clamp } from '../core/math';
 
@@ -64,7 +64,7 @@ export class WorldSound {
     }
   }
 
-  update(rivals: Rival[], traffic: Traffic, carX: number, carZ: number, active: boolean): void {
+  update(rivals: Rival[], traffic: Traffic | null, carX: number, carZ: number, active: boolean): void {
     if (!this.live) return;
     const ctx = this.audio.ctx!;
     const t = ctx.currentTime;
@@ -96,9 +96,11 @@ export class WorldSound {
       voice.gain.gain.setTargetAtTime(0.10 + r.speed01 * 0.10, t, 0.12);
     }
 
-    // City hum: count what is actually near, not what exists.
+    // City hum: count what is actually near, not what exists. Null on a road
+    // with nothing else on it, and a mountain pass in silence is the point of
+    // a mountain pass.
     let near = 0;
-    for (const c of traffic.cars) {
+    for (const c of traffic?.cars ?? []) {
       if (wrapDist(c.x, c.z, carX, carZ) < 90) near++;
     }
     const density = clamp(near / 7, 0, 1);

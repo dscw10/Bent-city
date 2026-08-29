@@ -1,6 +1,8 @@
-import { MODES } from '../game/modes';
+import { modesFor } from '../game/modes';
 import type { Mode } from '../game/modes';
+import { LEVELS, LEVEL_ORDER } from '../game/levels';
 import { save, persist } from '../game/storage';
+import type { ResultRow } from '../game/rules';
 
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const e = document.getElementById(id);
@@ -8,7 +10,7 @@ const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
   return e as T;
 };
 
-export interface ResultRow { label: string; value: string; highlight?: boolean }
+export type { ResultRow };
 
 export interface ScreenCallbacks {
   onStart(mode: Mode): void;
@@ -30,11 +32,15 @@ export class Screens {
   private readonly title = el('titleScreen');
   private readonly pause = el('pauseScreen');
   private readonly result = el('resultScreen');
-  private selected: Mode = MODES[0];
+  private place = 0;
+  private modes: Mode[] = modesFor(LEVEL_ORDER[0]);
+  private selected: Mode = this.modes[0];
   private modeButtons: HTMLElement[] = [];
+  private placeButtons: HTMLElement[] = [];
   private controllerRow: HTMLElement | null = null;
 
   constructor(private readonly cb: ScreenCallbacks) {
+    this.buildPlaceList();
     this.buildModeList();
     this.buildSettings();
 
@@ -57,17 +63,38 @@ export class Screens {
     return null;
   }
 
-  /** Move the mode selection by one, for D-pad navigation. Wraps. */
+  /**
+   * Move the mode selection by one, for D-pad navigation.
+   *
+   * It runs off the end of one place's modes and into the next place's rather
+   * than wrapping inside a place, so a controller can reach every run in the
+   * game with one axis and never has to find a second control for the picker.
+   */
   cycleMode(delta: number): void {
-    const i = MODES.indexOf(this.selected);
-    const next = (i + delta + MODES.length) % MODES.length;
-    this.selectMode(next);
+    const i = this.modes.indexOf(this.selected);
+    const next = i + delta;
+    if (next < 0) {
+      this.selectPlace((this.place - 1 + LEVEL_ORDER.length) % LEVEL_ORDER.length, -1);
+    } else if (next >= this.modes.length) {
+      this.selectPlace((this.place + 1) % LEVEL_ORDER.length, 0);
+    } else {
+      this.selectMode(next);
+    }
+  }
+
+  /** `pick` is the mode index to land on: 0 for the first, −1 for the last. */
+  private selectPlace(index: number, pick = 0): void {
+    this.place = index;
+    this.modes = modesFor(LEVEL_ORDER[index]);
+    this.placeButtons.forEach((b, i) => b.classList.toggle('sel', i === index));
+    this.buildModeList();
+    this.selectMode(pick < 0 ? this.modes.length - 1 : pick);
   }
 
   private selectMode(index: number): void {
-    this.selected = MODES[index];
+    this.selected = this.modes[index];
     this.modeButtons.forEach((b, i) => b.classList.toggle('sel', i === index));
-    this.showTitle();          // refresh the best-score line for this mode
+    this.showTitle();          // refresh the best line for this mode
   }
 
   /** Live controller state, shown on the pause screen so a first pairing is diagnosable. */
@@ -79,12 +106,21 @@ export class Screens {
 
   showTitle(): void {
     this.setOnly(this.title);
-    const best = save.best[this.selected.id] ?? 0;
     const n = save.totalDeliveries;
     const tally = `${n} ${n === 1 ? 'delivery' : 'deliveries'} all told`;
-    el('titleBest').textContent = best > 0
-      ? `Best ${this.selected.name.toLowerCase()} — ¥${best.toLocaleString('en-GB')} · ${tally}`
+
+    // The two places are scored on different things, so the best line has to
+    // ask the right question: most yen in the city, least time on the pass.
+    const time = save.bestTime[this.selected.id];
+    const yen = save.best[this.selected.id] ?? 0;
+    const name = this.selected.name.toLowerCase();
+    el('titleBest').textContent =
+      time !== undefined ? `Best ${name} — ${mmssT(time)} · ${tally}`
+      : yen > 0 ? `Best ${name} — ¥${yen.toLocaleString('en-GB')} · ${tally}`
       : tally;
+
+    const btn = el('startBtn');
+    btn.textContent = this.selected.level === 'pass' ? 'Start the run' : 'Start shift';
   }
 
   showPause(modeName: string): void {
@@ -92,10 +128,10 @@ export class Screens {
     el('pauseSub').textContent = modeName;
   }
 
-  showResult(title: string, score: number, rows: ResultRow[]): void {
+  showResult(title: string, score: string, rows: ResultRow[]): void {
     this.setOnly(this.result);
     el('resultEyebrow').textContent = title;
-    el('resultScore').textContent = `¥${score.toLocaleString('en-GB')}`;
+    el('resultScore').textContent = score;
     const box = el('resultRows');
     box.innerHTML = '';
     for (const r of rows) {
@@ -115,10 +151,29 @@ export class Screens {
     target.classList.add('on');
   }
 
+  private buildPlaceList(): void {
+    const list = el('placeList');
+    for (let i = 0; i < LEVEL_ORDER.length; i++) {
+      // Built rather than played: this only needs the name and the blurb, and
+      // constructing a level is a road network and nothing else until build().
+      const level = LEVELS[LEVEL_ORDER[i]]();
+      const btn = document.createElement('button');
+      btn.className = 'place';
+      btn.innerHTML =
+        `<span class="name">${level.name}</span><span class="desc">${level.blurb}</span>`;
+      btn.addEventListener('click', () => this.selectPlace(i));
+      this.placeButtons.push(btn);
+      list.appendChild(btn);
+    }
+    this.placeButtons[0].classList.add('sel');
+  }
+
   private buildModeList(): void {
     const list = el('modeList');
-    for (let i = 0; i < MODES.length; i++) {
-      const m = MODES[i];
+    list.innerHTML = '';
+    this.modeButtons = [];
+    for (let i = 0; i < this.modes.length; i++) {
+      const m = this.modes[i];
       const btn = document.createElement('button');
       btn.className = 'mode';
       btn.innerHTML =
@@ -255,4 +310,11 @@ export class Screens {
     ctl.append(input, num);
     return row;
   }
+}
+
+/** m:ss.t, matching how a pass run is reported everywhere else. */
+function mmssT(t: number): string {
+  const m = Math.floor(t / 60);
+  const rest = t - m * 60;
+  return `${m}:${rest < 10 ? '0' : ''}${rest.toFixed(1)}`;
 }

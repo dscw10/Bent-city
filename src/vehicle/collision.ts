@@ -1,6 +1,6 @@
 import type { Block } from '../render/city';
 import type { Car } from './vehicle';
-import { wrapDelta, wrap } from '../core/city-layout';
+import { wrapDelta, wrap } from '../core/place';
 import { clamp } from '../core/math';
 
 /**

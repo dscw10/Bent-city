@@ -1,4 +1,4 @@
-import { wrapDist } from '../core/city-layout';
+import { wrapDist } from '../core/place';
 import { RoadNetwork, edgeKey } from '../world/network';
 import type { Block } from '../render/city';
 import type { Mode } from './modes';

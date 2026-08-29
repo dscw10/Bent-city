@@ -1,7 +1,7 @@
 {
   "name": "melonpan-delivery-service",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "An arcade delivery game whose city folds up in front of you: street-level perspective near the truck, top-down map far ahead, in one continuous view.",
   "scripts": {

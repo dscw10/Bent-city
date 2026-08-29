@@ -3,7 +3,9 @@
 An arcade delivery game with one idea behind it: **a single continuous camera
 view that is street-level perspective near you and a top-down map far ahead,
 with no cut or split between them.** You drive a matcha-green kei truck
-delivering melonpan across a city that folds up in front of you.
+delivering melonpan across a city that folds up in front of you — or, on the
+Kaidō pass, chasing a clock up five kilometres of mountain road with the corners
+laid out flat above the horizon.
 
 The camera is completely ordinary. The *world* bends.
 
@@ -23,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run dev` | Vite dev server with hot reload |
 | `npm run build` | Typecheck, then build a static site into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
-| `npm test` | 42 headless tests over the rules, the physics and collision |
+| `npm test` | 118 headless tests over the rules, the physics, collision and the pass |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run check` | Typecheck and tests — run this before committing |
 
@@ -31,6 +33,14 @@ npm run dev        # http://localhost:5173
 GitHub Pages, Cloudflare Pages or a folder on a web server unchanged.
 
 ## Playing it
+
+Pick a **place** first, then a mode. The two are not difficulty settings on one
+game — they are two games that happen to share a truck.
+
+| Place | The game |
+|---|---|
+| **The city** | Deliveries. Several orders live at once, three crates a load, rivals racing you for them, roadworks that move. The clock is only refilled by delivering. |
+| **Kaidō pass** | A timed run, start line to summit and over. One road, nine checkpoints, no rivals — and the plan region stops being a map and becomes a co-driver. |
 
 **Keyboard** — **WASD** or the arrows, **Space** brake, **Shift** drift,
 **Esc** pause, **M** mute, **T** the bend tuner.
@@ -163,6 +173,28 @@ needs a component built for each.** An objective has a tall pillar for the
 street and a flat ring for the map. A closure has bars across the carriageway
 and a flat X. A building has a facade and a roof tone that encodes its height.
 
+### …and on a road with no junctions
+
+The mountain pass is the same question asked again, with the city's answer taken
+away. One road means no route to choose, so a map of it would be a stripe of
+nothing.
+
+What lives up there instead is **what the road is about to do**. The route ahead
+is drawn as a ribbon coloured by corner grade — rally notes, where 1 is the
+tightest and 6 is barely a bend — so a red stretch nine hundred metres up the
+valley is on screen at the same time as your own bonnet. Lifting for a corner
+you cannot yet see is a decision no street-level view can offer you.
+
+The two-component rule holds: a corner has **rungs painted flat across the road**
+(countable at map scale, where a smooth gradient would be a smudge) and a
+**board on a post** out on the verge for the near field. The left-hand HUD column
+carries the same information as text — grade and distance — exactly as it
+carries the order manifest in the city.
+
+There is no crash barrier. The valley wall is steep enough that gravity beats
+what the tyres can put down, so going off costs you the corner rather than the
+run.
+
 ## Testing it on an iPad with a controller
 
 **Get it onto a URL — no computer required.** `.github/workflows/deploy.yml`
@@ -235,12 +267,14 @@ this device:
 
 ```
 src/
-  core/     layout, terrain, palette, maths, projection tuning
-  render/   bend shader, geometry builder, city, block archetypes, materials,
-            marker batching, chase camera, projection state
+  core/     city layout, pass shape, terrain, place (wrap + off-road),
+            palette, maths, projection tuning
+  render/   bend shader, geometry builder, city, pass scenery, block
+            archetypes, materials, marker batching, chase camera, projection
   vehicle/  raycast suspension, collision, truck mesh
-  world/    routing graph, rivals, traffic, pedestrians
-  game/     dispatch, modes, run state machine, persistence
+  world/    road network + its generators, rivals, traffic, pedestrians
+  game/     levels, rules (delivery / pass run), dispatch, pace notes, modes,
+            run shell, persistence
   audio/    bus graph, engine, world sound, music, one-shots
   ui/       HUD, screens, joystick, bend tuner, stylesheet
 tests/      headless tests — nothing here touches WebGL or the DOM
@@ -276,6 +310,17 @@ Kept short here; the full list with the stories is in `context.md`.
   come from where a bent building *looks* like it is, that is the bug.
 - **Any full-screen overlay needs `pointer-events: none`,** or it silently eats
   every tap on the page.
+- **Quad winding decides the lighting.** `Builder.quad` derives the face normal
+  from the corner order, and the materials are double-sided — so a strip wound
+  the wrong way still draws, just lit from underneath. The pass's whole valley
+  shipped like that for an afternoon and read as permanent shadow.
+- **The world wraps only where the level says it does.** `core/place.ts` owns
+  that. Fold a mountain pass and driving off the summit puts you back on the
+  start line at ninety kilometres an hour.
+- **CPU terrain and shader terrain must stay identical, in both branches.** They
+  live next to each other on purpose: the city's in `core/terrain.ts`, the
+  pass's in `core/pass-shape.ts` beside its GLSL twin. Let them drift and the
+  truck drives on a ghost surface, which presents as a physics bug.
 
 ## Built with
 

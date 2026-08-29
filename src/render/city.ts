@@ -6,25 +6,13 @@ import { BUILDERS } from './blocks';
 import type { BlockKind } from './blocks';
 import { GRID, PITCH, TILE, TILES_ACROSS, nodePos } from '../core/city-layout';
 import { bentMat, roadMat, addBent } from './materials';
+import type { Block, Chunk, Scenery } from './scenery';
 
 export type { BlockKind } from './blocks';
+export type { Block } from './scenery';
 
-/** A building footprint, in home-tile coordinates. Collision reads these. */
-export interface Block { x: number; z: number; w: number; d: number }
-
-/** One drawn copy of the tile, and where it sits. */
-export interface Tile {
-  mesh: THREE.Mesh;
-  ox: number;
-  oz: number;
-}
-
-export interface CityData {
-  blocks: Block[];
-  /** What occupies each block, indexed [i][j]. */
-  kinds: BlockKind[][];
-  tiles: Tile[];
-}
+/** What occupies each block, indexed [i][j]. Kept for the dev overlay. */
+export interface CityMeta { kinds: BlockKind[][] }
 
 const CITY_SEED = 20260826;
 
@@ -61,7 +49,7 @@ function pickKind(r: number): BlockKind {
  * fog distance allowed. This is the build's main performance risk — 25 draws —
  * but they all share one buffer, so it is 25 draw calls rather than 25 uploads.
  */
-export function buildCity(scene: THREE.Scene): CityData {
+export function buildCity(scene: THREE.Scene): Scenery {
   const b = new Builder();
   const rnd = makeRandom(CITY_SEED);
   const blocks: Block[] = [];
@@ -94,17 +82,24 @@ export function buildCity(scene: THREE.Scene): CityData {
 
   const geo = b.toGeometry();
   const half = (TILES_ACROSS - 1) / 2;
-  const tiles: Tile[] = [];
+  const chunks: Chunk[] = [];
+  // Margin on the bounds: buildings are buried deep and their skirts reach
+  // outside the tile they belong to.
+  const M = 60;
   for (let ox = -half; ox <= half; ox++) {
     for (let oz = -half; oz <= half; oz++) {
       const mesh = new THREE.Mesh(geo, bentMat);
       mesh.position.set(ox * TILE, 0, oz * TILE);
       addBent(scene, mesh);
-      tiles.push({ mesh, ox, oz });
+      chunks.push({
+        mesh,
+        x0: ox * TILE - M, x1: ox * TILE + TILE + M,
+        z0: oz * TILE - M, z1: oz * TILE + TILE + M
+      });
     }
   }
 
-  return { blocks, kinds, tiles };
+  return { blocks, chunks, meta: { kinds } };
 }
 
 /**
@@ -122,7 +117,7 @@ export function buildCity(scene: THREE.Scene): CityData {
  * Total cost: about 33k vertices instead of the 150k a uniformly-subdivided
  * ground plane needed.
  */
-export function buildRoadSurface(scene: THREE.Scene): void {
+export function buildRoadSurface(scene: THREE.Scene): Chunk {
   const XS = 72, ZS = 260, X = 1200, ZA = -90, ZB = 1400, POW = 2.2, POWX = 2.4;
   const p: number[] = [], n: number[] = [], c: number[] = [];
 
@@ -166,4 +161,5 @@ export function buildRoadSurface(scene: THREE.Scene): void {
   const m = new THREE.Mesh(g, roadMat);
   m.renderOrder = -1;
   addBent(scene, m);
+  return { mesh: m, x0: 0, z0: 0, x1: 0, z1: 0, everywhere: true };
 }

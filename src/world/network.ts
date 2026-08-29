@@ -1,4 +1,3 @@
-import { wrapDelta } from '../core/city-layout';
 
 /**
  * ============================ ROAD NETWORK ============================
@@ -69,9 +68,20 @@ export class RoadNetwork {
     return `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`;
   }
 
-  /** Separation between two points, through the seam if this level wraps. */
+  /**
+   * Separation between two points, through the seam if this level wraps.
+   *
+   * Folded against the NETWORK's own wrap size rather than the city's, so a
+   * pass — which does not wrap at all — measures its five kilometres honestly
+   * instead of folding them into half a city block.
+   */
   delta(a: number, b: number): number {
-    return this.wrapSize > 0 ? wrapDelta(a, b) : a - b;
+    const W = this.wrapSize;
+    if (W <= 0) return a - b;
+    let d = (a - b) % W;
+    if (d > W / 2) d -= W;
+    if (d < -W / 2) d += W;
+    return d;
   }
 
   distanceTo(i: number, x: number, z: number): number {
@@ -207,8 +217,8 @@ export class RoadNetwork {
     const out: Point[] = [];
     let px = refX, pz = refZ;
     for (const [x, z] of points) {
-      const ux = px + wrapDelta(x, px);
-      const uz = pz + wrapDelta(z, pz);
+      const ux = px + this.delta(x, px);
+      const uz = pz + this.delta(z, pz);
       out.push([ux, uz]);
       px = ux; pz = uz;
     }

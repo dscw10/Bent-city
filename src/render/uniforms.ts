@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { P, foldRadians } from '../core/config';
 import { TA, TB, TC, TK } from '../core/terrain';
+import { passUniformValues } from '../core/pass-shape';
 import { smootherstep, smoothstep } from '../core/math';
 
 export const PAPER = new THREE.Color(0xEDEFF1);
@@ -9,12 +10,26 @@ export const PAPER = new THREE.Color(0xEDEFF1);
  * One uniform block, shared by reference across every bent material, so a
  * slider moves the whole world at once.
  */
+const PASS = passUniformValues();
+
 export const uniforms = {
   uW2P:      { value: new THREE.Matrix4() },
   uP2W:      { value: new THREE.Matrix4() },
   uLocal:    { value: 0 },
   uTerr:     { value: new THREE.Vector3(TA, TB, TC) },
   uTK:       { value: TK },
+  /* Which terrain the shader should evaluate: 0 city, 1 pass. Levels set it,
+     alongside setTerrain() on the CPU side. The two must always move together
+     — that pairing is the ghost-surface bug waiting to happen. */
+  uTerrMode: { value: 0 },
+  /* Ground height under the truck. The fold measures building height from this
+     rather than from sea level; see the note in BENT_VERT. */
+  uGroundY:  { value: 0 },
+  uPassA:    { value: new THREE.Vector3(...PASS.A) },
+  uPassB:    { value: new THREE.Vector3(...PASS.B) },
+  uPassC:    { value: new THREE.Vector3(...PASS.C) },
+  uPassD:    { value: new THREE.Vector4(...PASS.D) },
+  uPassE:    { value: new THREE.Vector4(...PASS.E) },
   uZ0:       { value: P.z0 },
   uR:        { value: P.R },
   uKmin:     { value: P.kMin },
