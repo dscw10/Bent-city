@@ -115,9 +115,23 @@ Safari:
 > repo → **Settings** → **Pages** → Build and deployment → Source: **GitHub Actions**
 
 That is the whole setup. Every push then publishes to
-`https://<user>.github.io/<repo>/`, and the **Actions** tab has a *Run workflow*
-button for redeploying without changing anything. The build is gated on the test
-suite, so a broken push does not become a broken URL.
+`https://<user>.github.io/<repo>/`. The build is gated on the test suite, so a
+broken push does not become a broken URL.
+
+**To redeploy without changing anything**, the simplest trigger is a push — any
+commit on a watched branch starts a run. GitHub's own buttons for this are
+genuinely awkward on a tablet:
+
+- *Re-run failed jobs* lives on the **run's own page** (Actions → click the run),
+  top right, behind a **Re-run jobs** dropdown. It is not on the Actions list
+  page, and on a narrow screen it collapses to an icon that is easy to miss.
+- *Run workflow* only appears once you have selected the workflow **by name in
+  the left-hand sidebar** of the Actions tab. On the "All workflows" view there
+  is no such button, which is the usual reason people cannot find it.
+
+If the deploy job fails with `Failed to create deployment (status: 404)` and
+`Ensure GitHub Pages has been enabled`, that is the Pages source not being set
+to GitHub Actions yet — the build itself is fine. Set it, then push anything.
 
 The build output uses relative paths throughout, which is why it works from a
 project subpath rather than only from a domain root.
