@@ -1,0 +1,63 @@
+# Builds the game and publishes it to GitHub Pages.
+#
+# The point of this file is that NOTHING RUNS ON YOUR MACHINE. GitHub checks the
+# repo out, installs, typechecks, tests and builds, then serves the result — so
+# a phone or an iPad with a browser is enough to ship a change.
+#
+# One-time setup, doable entirely from Safari:
+#   repo → Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#
+# After that every push publishes, and the Actions tab has a "Run workflow"
+# button if you ever want to redeploy without changing anything.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/game-project-dev-0i4q8b
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; cancel an in-flight one if a newer push arrives.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The build script already runs tsc, but the tests are the thing worth
+      # blocking a deploy on: they cover the physics and the game rules, and a
+      # broken one means the URL would be broken too.
+      - run: npm test
+
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

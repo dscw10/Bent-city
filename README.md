@@ -107,20 +107,26 @@ and a flat X. A building has a facade and a roof tone that encodes its height.
 
 ## Testing it on an iPad with a controller
 
-**Get it onto a URL.** The iPad needs to reach it over HTTPS, and the easiest
-route with no account and no config is a drag-and-drop static host:
+**Get it onto a URL — no computer required.** `.github/workflows/deploy.yml`
+builds and publishes the game on GitHub's own runners, so a phone or an iPad
+with a browser is enough to ship a change. One-time setup, doable entirely from
+Safari:
 
-```bash
-npm run build          # produces dist/
-```
+> repo → **Settings** → **Pages** → Build and deployment → Source: **GitHub Actions**
 
-Drop the `dist/` folder onto [Netlify Drop](https://app.netlify.com/drop) and
-you get an HTTPS URL immediately. Any other static host works the same way —
-`dist/` uses relative paths and has no server-side anything.
+That is the whole setup. Every push then publishes to
+`https://<user>.github.io/<repo>/`, and the **Actions** tab has a *Run workflow*
+button for redeploying without changing anything. The build is gated on the test
+suite, so a broken push does not become a broken URL.
 
-For a faster iteration loop on the same wifi, `npm run dev -- --host` prints a
-LAN address the iPad can open directly. Fine for quick checks; use the deployed
-HTTPS build for anything you want to trust.
+The build output uses relative paths throughout, which is why it works from a
+project subpath rather than only from a domain root.
+
+If you do have a machine and want a one-off without touching GitHub settings,
+`npm run build` produces `dist/`, and dragging that folder onto
+[Netlify Drop](https://app.netlify.com/drop) gives you an HTTPS URL with no
+account. For a fast iteration loop on the same wifi, `npm run dev -- --host`
+prints a LAN address the iPad can open directly.
 
 **Install it to the home screen.** In Safari, Share → *Add to Home Screen*.
 Launched from the icon it runs without browser chrome, which is worth a
