@@ -3,12 +3,13 @@ import { makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { collideBlocks } from '../src/vehicle/collision';
 import { Dispatch } from '../src/game/dispatch';
 import { findMode } from '../src/game/modes';
-import { buildGridNetwork } from '../src/world/networks/grid';
-import { nodePos, TILE } from '../src/core/city-layout';
+import { cityPlan } from '../src/world/networks/organic';
+import { TILE } from '../src/core/city-layout';
+import { nodePos } from './helpers/lattice';
 import { wrapDist, wrapDelta } from '../src/core/place';
-import type { Block } from '../src/render/city';
+import type { Block } from '../src/render/scenery';
 import { PAD } from '../src/vehicle/collision';
-import { buildCityBlocks } from './helpers/city-blocks';
+import { buildCityBlocks, gapBetween } from './helpers/city-blocks';
 
 /**
  * Collision is per BUILDING rather than per block, which is what keeps
@@ -225,30 +226,99 @@ describe('getting unstuck', () => {
     expect(wrapDelta(car.z, stuckAt)).toBeLessThan(-6);
   });
 
-  it('leaves every alley in the city wide enough for the truck', () => {
-    // Whatever the block layouts do, no two footprints may leave a gap the
-    // truck cannot fit through — that is a wedge trap, not a shortcut.
-    const city = buildCityBlocks();
-    let worst = Infinity;
-    for (let i = 0; i < city.length; i++) {
-      for (let j = i + 1; j < city.length; j++) {
-        const a = city[i], b = city[j];
-        const gapX = Math.abs(a.x - b.x) - (a.w + b.w) / 2 - 2 * PAD;
-        const gapZ = Math.abs(a.z - b.z) - (a.d + b.d) / 2 - 2 * PAD;
-        // Only pairs that actually face each other across a gap count.
-        const facesX = Math.abs(a.z - b.z) < (a.d + b.d) / 2;
-        const facesZ = Math.abs(a.x - b.x) < (a.w + b.w) / 2;
-        if (facesX && gapX > 0) worst = Math.min(worst, gapX);
-        if (facesZ && gapZ > 0) worst = Math.min(worst, gapZ);
+  it('seals every block, so its yard is not a trap with a way in', () => {
+    /* The invariant that actually means something, arrived at by chasing the
+       wrong one for an afternoon.
+       The old lattice city built up to four separate buildings per block and
+       the rule was "no gap narrower than the truck". Stated carefully that rule
+       is vacuous: a gap narrower than 2×PAD cannot be ENTERED, because the
+       truck's own radius sees to it and the deepest-overlap resolver pushes it
+       back out of the mouth. And a gap WIDER than that is a road.
+
+       What matters on a block built as a continuous terrace is different and
+       sharper: the wall must have no way through it at all. Then the yard
+       behind is unreachable, and whatever shape it is cannot trap anyone. So
+       the test is that consecutive buildings round the terrace OVERLAP —
+       which is the property `perimeter` is constructed to guarantee, rather
+       than a number it is tuned to hit. */
+    const groups = buildCityBlocks().filter(g => g.kind === 'buildings');
+    expect(groups.length).toBeGreaterThan(40);
+    const holes: string[] = [];
+    for (const g of groups) {
+      for (let i = 0; i < g.blocks.length; i++) {
+        const j = (i + 1) % g.blocks.length;
+        const gap = gapBetween(g.blocks[i], g.blocks[j]);
+        if (gap > 0.001) holes.push(`${gap.toFixed(2)}m`);
       }
     }
-    expect(worst).toBeGreaterThan(1.5);
+    expect(holes.slice(0, 8).join(' · ')).toBe('');
+  });
+
+  it('never wedges the truck against a block it drove into', () => {
+    /* The historical bug, tested behaviourally. Two facing surfaces used to be
+       resolved in the same pass and pinned anything that nosed between them.
+       Drive hard into a real block, then reverse — the truck has to get away,
+       whatever it hit and at whatever angle. */
+    const groups = buildCityBlocks().filter(g => g.blocks.length > 0);
+    for (let k = 3; k < groups.length; k += 17) {
+      const blocks = groups[k].blocks;
+      let cx = 0, cz = 0;
+      for (const b of blocks) { cx += b.x; cz += b.z; }
+      cx /= blocks.length; cz /= blocks.length;
+      for (let dir = 0; dir < 6; dir++) {
+        const a = (dir / 6) * Math.PI * 2 + 0.3;
+        const car = makeCar();
+        resetCar(car, cx - Math.sin(a) * 60, cz - Math.cos(a) * 60, a);
+        const dt = 1 / 60;
+        for (let i = 0; i < 60 * 5; i++) {
+          for (let s = 0; s < 3; s++) stepVehicle(car, dt / 3, 1, 0);
+          collideBlocks(car, blocks);
+        }
+        const hitX = car.x, hitZ = car.z;
+        for (let i = 0; i < 60 * 4; i++) {
+          for (let s = 0; s < 3; s++) stepVehicle(car, dt / 3, -1, 0);
+          collideBlocks(car, blocks);
+        }
+        expect(Math.hypot(car.x - hitX, car.z - hitZ),
+          `${groups[k].kind}, heading ${dir}`).toBeGreaterThan(8);
+      }
+    }
+  });
+
+  it('lets the truck bounce off a block rather than burying itself in one', () => {
+    /* The behavioural half, on the city's real geometry. Drive at a block from
+       eight directions and the truck must end up outside every footprint —
+       whatever shape the block is and whatever the archetype put on it. */
+    const groups = buildCityBlocks().filter(g => g.blocks.length > 0);
+    for (let k = 0; k < groups.length; k += 23) {
+      const blocks = groups[k].blocks;
+      let cx = 0, cz = 0;
+      for (const b of blocks) { cx += b.x; cz += b.z; }
+      cx /= blocks.length; cz /= blocks.length;
+      for (let dir = 0; dir < 8; dir++) {
+        const a = (dir / 8) * Math.PI * 2;
+        const car = makeCar();
+        resetCar(car, cx - Math.sin(a) * 70, cz - Math.cos(a) * 70, a);
+        const dt = 1 / 60;
+        for (let i = 0; i < 60 * 6; i++) {
+          for (let s = 0; s < 3; s++) stepVehicle(car, dt / 3, 1, 0);
+          collideBlocks(car, blocks);
+        }
+        for (const b of blocks) {
+          expect(gapBetween({ x: car.x, z: car.z, w: 0.01, d: 0.01 }, b),
+            `${groups[k].kind}, heading ${dir}`).toBeGreaterThan(PAD - 0.35);
+        }
+      }
+    }
   });
 });
 
 describe('road closures', () => {
-  const net = buildGridNetwork();
-  const home = { x: nodePos(4), z: nodePos(4) };
+  /* On the organic city now. Closures were always network-driven rather than
+     grid-driven — that was the point of the road-network refactor — so this
+     needed nothing but a different network to run against. */
+  const net = cityPlan().network;
+  const home = { x: net.nodes[0].x, z: net.nodes[0].z };
   it('puts a barrier on every closed segment', () => {
     const d = new Dispatch();
     d.start(findMode('rush'), net, home.x, home.z);
@@ -264,13 +334,12 @@ describe('road closures', () => {
     const d = new Dispatch();
     d.start(findMode('rush'), net, home.x, home.z);
     const c = d.closures[0];
-    // Approach along the road the barrier blocks.
-    const heading = c.alongX ? 0 : Math.PI / 2;
-    const start = c.alongX
-      ? { x: c.x, z: c.z - 40 }
-      : { x: c.x - 40, z: c.z };
-    const car = driveInto(d.barriers, start.x, start.z, heading, 6);
-    const past = c.alongX ? car.z - c.z : car.x - c.x;
+    // Approach along the road the barrier blocks, whatever angle that is.
+    const heading = c.angle;
+    const car = driveInto(
+      d.barriers, c.x - Math.sin(heading) * 40, c.z - Math.cos(heading) * 40, heading, 6);
+    // How far past the barrier the truck got, measured along the road.
+    const past = (car.x - c.x) * Math.sin(heading) + (car.z - c.z) * Math.cos(heading);
     expect(past).toBeLessThan(0);
   });
 

@@ -57,8 +57,14 @@ export interface Closure {
   b: number;
   x: number;
   z: number;
-  /** True if the barrier runs along the x axis (blocking a north-south road). */
-  alongX: boolean;
+  /**
+   * Bearing of the road it blocks. The barrier lies across it.
+   *
+   * This was a boolean — "does it run along x" — which is all a lattice can
+   * tell you and is a coin flip on a street at 37 degrees. The organic city
+   * made the angle real information, so it is stored as one.
+   */
+  angle: number;
 }
 
 export type DispatchEvent =
@@ -308,21 +314,20 @@ export class Dispatch {
       const [bx, bz] = this.net.position(b);
       // Which way the barrier lies follows the segment it blocks, whatever
       // angle that happens to be.
-      const alongX = Math.abs(this.net.delta(bx, ax)) < Math.abs(this.net.delta(bz, az));
+      const dx = this.net.delta(bx, ax), dz = this.net.delta(bz, az);
       this.closures.push({
         a, b,
-        x: ax + this.net.delta(bx, ax) / 2,
-        z: az + this.net.delta(bz, az) / 2,
-        alongX
+        x: ax + dx / 2,
+        z: az + dz / 2,
+        angle: Math.atan2(dx, dz)
       });
     }
 
     for (const c of this.closures) {
       // Sized to span the carriageway. Block interiors stay drivable, so this
       // diverts you onto the slow pavement rather than stopping you dead.
-      this.barriers.push(c.alongX
-        ? { x: c.x, z: c.z, w: 15, d: 2.2 }
-        : { x: c.x, z: c.z, w: 2.2, d: 15 });
+      // 15 across the road, 2.2 along it, turned to sit on the carriageway.
+      this.barriers.push({ x: c.x, z: c.z, w: 15, d: 2.2, a: c.angle });
     }
   }
 }

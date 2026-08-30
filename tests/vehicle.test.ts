@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { V, TUNE, makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 import { terrainAt, slopeAt } from '../src/core/terrain';
-import { nodePos, TILE, PITCH } from '../src/core/city-layout';
+import { TILE } from '../src/core/city-layout';
+import { nodePos, PITCH } from './helpers/lattice';
 import { P } from '../src/core/config';
 
 /**

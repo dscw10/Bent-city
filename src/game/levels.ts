@@ -1,11 +1,11 @@
 import type * as THREE from 'three';
 import type { RoadNetwork } from '../world/network';
-import { buildGridNetwork } from '../world/networks/grid';
+import { cityPlan } from '../world/networks/organic';
 import { buildPassNetwork, passSpawn } from '../world/networks/pass';
 import { buildCity, buildRoadSurface } from '../render/city';
 import { buildPass } from '../render/pass-scenery';
 import type { Scenery } from '../render/scenery';
-import { onOffroad, nodePos, TILE } from '../core/city-layout';
+import { TILE } from '../core/city-layout';
 import { passOffroad } from '../core/pass-shape';
 import { setPlace } from '../core/place';
 import { setTerrain } from '../core/terrain';
@@ -56,18 +56,24 @@ function applyTerrain(kind: TerrainKind): void {
 }
 
 export function cityLevel(): Level {
-  const network = buildGridNetwork();
+  const plan = cityPlan();
+  const spawnNode = plan.network.nodes[0];
+  const spawnTo = plan.network.nodes[spawnNode.links[0]];
   return {
     id: 'city',
     name: 'The city',
-    blurb: 'A lattice you can cut across, four drops live at once and two rivals working the same streets.',
-    network,
+    blurb: 'Streets that never meant to meet at right angles. Four drops live at once, two rivals working the same ones.',
+    network: plan.network,
     wrapSize: TILE,
-    offroad: onOffroad,
-    spawn: { x: nodePos(4), z: nodePos(4), heading: 0 },
+    offroad: plan.offroad,
+    spawn: {
+      x: spawnNode.x, z: spawnNode.z,
+      heading: Math.atan2(plan.network.delta(spawnTo.x, spawnNode.x),
+                          plan.network.delta(spawnTo.z, spawnNode.z))
+    },
     use() {
       applyTerrain('city');
-      setPlace({ wrapSize: TILE, offroad: onOffroad });
+      setPlace({ wrapSize: TILE, offroad: plan.offroad });
     },
     build(scene) {
       const data = buildCity(scene);

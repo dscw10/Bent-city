@@ -81,8 +81,8 @@ export class Builder {
        few units across leave visible facets and spikes right on the horizon,
        which is the most looked-at line in the game. Dropping the pointless
        vertical subdivision below bought the budget to make this finer. */
-    const sz_ = segZ ?? Math.max(3, Math.round(sz / 5));
-    const sx_ = Math.max(2, Math.round(sx / 8));
+    const sz_ = Math.min(12, segZ ?? Math.max(3, Math.round(sz / 5)));
+    const sx_ = Math.min(10, Math.max(2, Math.round(sx / 8)));
 
     /* VERTICAL SUBDIVISION IS ALWAYS 1, and it is worth knowing why.
      *
@@ -108,6 +108,62 @@ export class Builder {
     this.quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], sx_, sz_, roofCol ?? C.roof, A);
   }
 
+  /**
+   * A box turned about its own vertical axis.
+   *
+   * The city stopped being a lattice, and a building on a street that runs at
+   * 23 degrees has to sit on that street rather than square to the compass —
+   * the alternative is a block of buildings that all miss their own pavement.
+   * Same anchor rule as `box`: one anchor for the whole thing, so it stays
+   * vertical on a hillside.
+   */
+  boxRot(cx: number, cz: number, across: number, sy: number, along: number, ang: number,
+         col: RGB, roofCol?: RGB, segZ?: number, baseY = 0): void {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const y0 = baseY, y1 = y0 + sy;
+    const A: V2 = [cx, cz];
+    /* `ang` is a BEARING, the same convention as everything else in the game:
+       heading a means travelling along (sin a, cos a). So the `along` extent
+       runs that way and `across` runs to its right, and at a = 0 the two are
+       exactly the sx and sz of `box`. See the note on slabRot for the version
+       of this that was wrong for four months. */
+    const p = (u: number, v: number, y: number): V3 =>
+      [cx + u * ca + v * sa, y, cz - u * sa + v * ca];
+
+    const sx = across, sz = along;
+    const hx = sx / 2, hz = sz / 2;
+    // Capped. The fold only ever needs a few segments across a building, and an
+    // uncapped divisor turns one mistakenly huge box into a million triangles.
+    const sx_ = Math.min(10, Math.max(2, Math.round(sx / 8)));
+    const sz_ = Math.min(12, segZ ?? Math.max(3, Math.round(sz / 5)));
+    // Vertical subdivision is always 1 — see the long note in `box` for why
+    // that is provably free of effect under the bend.
+    this.quad(p(-hx, hz, y0), p(hx, hz, y0), p(hx, hz, y1), p(-hx, hz, y1), sx_, 1, col, A);
+    this.quad(p(hx, -hz, y0), p(-hx, -hz, y0), p(-hx, -hz, y1), p(hx, -hz, y1), sx_, 1, col, A);
+    this.quad(p(hx, hz, y0), p(hx, -hz, y0), p(hx, -hz, y1), p(hx, hz, y1), sz_, 1, shade(col), A);
+    this.quad(p(-hx, -hz, y0), p(-hx, hz, y0), p(-hx, hz, y1), p(-hx, -hz, y1), sz_, 1, shade(col), A);
+    this.quad(p(-hx, hz, y1), p(hx, hz, y1), p(hx, -hz, y1), p(-hx, -hz, y1), sx_, sz_,
+      roofCol ?? C.roof, A);
+  }
+
+  /**
+   * A flat polygon, fanned from its first vertex and subdivided.
+   *
+   * The subdivision is not optional. The bend happens per vertex, so a block-
+   * sized triangle drawn as three points folds as a chord and tears away from
+   * the road beside it. A triangle is passed to `quad` with its last two
+   * corners coincident, which subdivides it correctly and costs a strip of
+   * degenerate triangles at the tip that nothing ever sees.
+   */
+  polyFlat(pts: V2[], y: number, col: RGB, seg = 5): void {
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a: V3 = [pts[0][0], y, pts[0][1]];
+      const b: V3 = [pts[i][0], y, pts[i][1]];
+      const c: V3 = [pts[i + 1][0], y, pts[i + 1][1]];
+      this.quad(a, b, c, c, seg, seg, col);
+    }
+  }
+
   /** A flat horizontal patch with NO anchor, so it drapes over the terrain. */
   slab(cx: number, cz: number, sx: number, sz: number, y: number, col: RGB, seg?: number): void {
     const s = seg ?? Math.max(2, Math.round(Math.max(sx, sz) / 5));
@@ -118,12 +174,27 @@ export class Builder {
     );
   }
 
-  /** A flat patch rotated about Y. Used for turn arrows and angled markings. */
+  /**
+   * A flat patch rotated about Y. Used for turn arrows and angled markings.
+   *
+   * `ang` is a BEARING: the game's convention throughout is that heading a
+   * means travelling along (sin a, cos a), and `sz` runs that way while `sx`
+   * runs across it.
+   *
+   * THIS USED TO ROTATE THE WRONG WAY, and it is worth knowing why nobody
+   * noticed. The old version mapped the sz axis to (−sin a, cos a) — the
+   * heading REFLECTED in the z axis — which is identical for a = 0 and ±180,
+   * and differs by exactly 180° at ±90. Every one of those is a right angle,
+   * and while the city was a lattice every angle passed to this function was a
+   * right angle. It only became visible when a mountain road started asking for
+   * a corner board at 43 degrees, and then when the city's streets stopped
+   * meeting at right angles too.
+   */
   slabRot(cx: number, cz: number, sx: number, sz: number, y: number,
           ang: number, col: RGB, seg = 2): void {
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const pt = (dx: number, dz: number): V3 =>
-      [cx + dx * ca - dz * sa, y, cz + dx * sa + dz * ca];
+      [cx + dx * ca + dz * sa, y, cz - dx * sa + dz * ca];
     this.quad(pt(-sx / 2, sz / 2), pt(sx / 2, sz / 2), pt(sx / 2, -sz / 2), pt(-sx / 2, -sz / 2),
       seg, seg, col);
   }

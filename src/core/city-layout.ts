@@ -1,41 +1,18 @@
 /**
- * The city's dimensions. Everything about THE CITY — its geometry, its routing,
- * its collision, its traffic — reads these, so the grid can be resized in one
- * place.
+ * The city's dimensions — the two or three facts that are still constants now
+ * that its streets are generated rather than laid out on a lattice.
  *
  * The city is one TILE, drawn 5×5 around the player. The player's position is
  * wrapped into the home tile every frame, so the surrounding copies never move:
  * no streaming, no pop-in, one shared geometry.
  *
- * Note what is NOT here any more: the wrap arithmetic itself. That moved to
- * `core/place.ts` when a second location arrived, because a mountain pass has
- * two ends and folding its coordinates would teleport you off the summit back
- * onto the start line at full speed.
+ * Note what is NOT here any more. The wrap arithmetic moved to `core/place.ts`
+ * when a mountain pass arrived, because a pass has two ends. The grid pitch,
+ * the block size, the junction positions and the off-road test moved out when
+ * the city stopped being a grid: streets, blocks and pavements all come off the
+ * plan in `world/networks/organic.ts`, and the lattice survives only as a test
+ * fixture in tests/helpers/lattice.ts.
  */
-export const GRID = 9;                 // intersections per tile
-export const PITCH = 58;               // distance between intersections
+export const TILE = 522;               // the repeat distance
 export const ROADW = 14;               // road width
-export const BLOCK = PITCH - ROADW;    // the buildable square between roads
-export const TILE = GRID * PITCH;      // 522 — the repeat distance
 export const TILES_ACROSS = 5;         // how many copies are drawn per axis
-
-/** World coordinate of intersection index i. */
-export const nodePos = (i: number): number => i * PITCH;
-
-/** Fold into the home tile. Local to the city, which always wraps. */
-const cityWrap = (v: number): number => ((v % TILE) + TILE) % TILE;
-
-/**
- * True if (x,z) is inside a block footprint rather than on the carriageway —
- * pavement, plaza or car park. All of it is drivable, but draggy and slippery,
- * so cutting a corner is a shortcut with a price.
- *
- * Worked out from grid arithmetic rather than a lookup, so it costs nothing and
- * survives the tile wrap automatically.
- */
-export function onOffroad(x: number, z: number): boolean {
-  const lx = cityWrap(x) % PITCH;
-  const lz = cityWrap(z) % PITCH;
-  return lx > ROADW / 2 && lx < PITCH - ROADW / 2 &&
-         lz > ROADW / 2 && lz < PITCH - ROADW / 2;
-}

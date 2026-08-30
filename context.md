@@ -202,7 +202,7 @@ game, and the game is *about* the projection.
 
 Working:
 - The bend, with all ten parameters live on sliders and saved between sessions
-- Endlessly repeating city — one 9×9 tile drawn 5×5, player position wrapped
+- Endlessly repeating city — one 522m tile drawn 5×5, player position wrapped
 - Nine block archetypes, several of them landmarks designed to be read from above
 - Terrain, raycast suspension, weight transfer, pavements as costly shortcuts
 - **Dispatch**: several live orders at once, a three-crate capacity, bakeries,
@@ -336,8 +336,10 @@ open, so cutting a corner across the pavement is a real option — but off-road
 drag is roughly three times road drag and lateral grip is lower, so it costs you
 speed and stability. A shortcut with a price rather than a free one.
 
-`onOffroad()` works out surface from grid arithmetic rather than a lookup, so it
-costs nothing and works across the tile wrap automatically.
+`onOffroad()` worked out surface from grid arithmetic rather than a lookup, so
+it cost nothing and wrapped for free. The organic city cannot do that; it uses a
+hashed distance query against the road graph instead, which is a few times
+dearer and still nowhere near the frame budget.
 
 This matters for the projection too: it gives the plan-view region something
 genuinely useful to show, since block interiors are now navigable space and you
@@ -547,8 +549,8 @@ someone who isn't the person who built it.
 
 ## Infinite tiling (added 26 Aug)
 
-The city is one **tile** (9×9 intersections, 522 units square) drawn 3×3 around
-the player. The player's position is wrapped into the home tile every frame, so
+The city is one **tile** (522 units square — 9×9 intersections at the time,
+an irregular Voronoi network since 30 Aug) drawn 3×3 around the player. The player's position is wrapped into the home tile every frame, so
 the eight surrounding copies never move — no streaming, no pop-in, nine draw
 calls sharing one geometry.
 
@@ -782,20 +784,22 @@ Order value is paid by haul length in METRES now rather than in grid steps, for
 the same reason — it has to mean the same thing on a network whose links are not
 all the same length.
 
-### What is still lattice-bound, honestly
+### ~~What is still lattice-bound, honestly~~ — all of it, since 30 Aug
 
-The RULES are ported. The SCENERY is not:
+The RULES were ported here; the SCENERY was not. Kept as the record of what the
+split looked like, and of what it took to close:
 
-- `render/city.ts` still generates blocks and lane dashes from grid arithmetic.
-- `core/city-layout.ts`'s `onOffroad` is grid arithmetic, exposed through the
-  Level so a pass can answer differently.
-- `world/traffic.ts` keeps left in four cardinal directions and snaps to lanes
-  by grid maths, none of which means anything on a winding road. It is off by
-  default, and a pass wants a different mover entirely, so porting it waits
-  until there is a second network to port it to.
+- ~~`render/city.ts` still generates blocks and lane dashes from grid
+  arithmetic.~~ It generates from Voronoi cells now.
+- ~~`core/city-layout.ts`'s `onOffroad` is grid arithmetic.~~ The city's
+  off-road test is a distance query against the road graph, and the level still
+  owns it so a pass can answer differently.
+- ~~`world/traffic.ts` keeps left in four cardinal directions and snaps to lanes
+  by grid maths.~~ Traffic drives edges of the graph.
 
-That split is deliberate rather than half-finished: a pass needs its own scenery
-generator regardless, and the shared part is the graph underneath.
+The split was deliberate rather than half-finished: a pass needs its own scenery
+generator regardless, and the shared part is the graph underneath. Closing it is
+"The city stops being a grid" below.
 
 `Level` in `game/levels.ts` is the shape a second place slots into — network,
 wrap size, off-road test, spawn, and a `build()` that makes the scenery. Only
@@ -1005,6 +1009,154 @@ The old charge paid out fastest in a band around 32° of slip. It was precise,
 and it rewarded a skill the player had no instrument for — you cannot see your
 own slip angle. Committing to the corner is legible; holding 32° is not.
 
+## The city stops being a grid (30 Aug)
+
+Chris: *"I don't want it to be a grid."*
+
+The lattice was never a design decision. It was the cheapest thing that could
+possibly work, and it quietly cost the game the one thing the projection was
+built for. On a grid every junction offers the same four choices, every route
+is the same length as every other route with the same number of turns, and the
+streets themselves carry no information — look at the plan region of a grid
+city and the only thing in it is where the drops are.
+
+An irregular city puts the information back. Blocks differ in size and shape,
+so distance and turn count stop agreeing; a long diagonal is genuinely quicker
+than the same displacement in steps; a junction becomes a place with a shape
+you recognise. That is a map worth looking at, which is the entire argument for
+the fold.
+
+### Voronoi, not Delaunay — and why the first attempt failed
+
+`src/world/networks/organic.ts` builds the plan in four steps.
+
+1. **Points.** Poisson-disc-ish sampling on the torus, then a few rounds of
+   repulsion. Not a jittered grid — a jittered grid is still a grid, it just has
+   worse right angles.
+2. **Delaunay**, by Bowyer–Watson over a **3×3 replication** of the points.
+   The replication is what makes the result periodic: triangulate nine copies,
+   keep the triangles touching the middle one, map every vertex back to its
+   original with the offset it came from. Triangulating the tile alone leaves a
+   boundary, and a boundary is a seam you can see from the map.
+3. **Take the Voronoi.** Roads are the Voronoi edges, blocks are the cells.
+4. **Contract the stubs.** Voronoi junctions are all three-way; where two fall
+   within a few metres you get a staggered crossroads with a three-metre road
+   between the halves. Union-find contraction of edges under 16 m turns those
+   into the four-way crossroads a city ought to have, without touching the cells.
+
+Step 3 is the one that was wrong first. The original plan was to keep Delaunay
+and prune it with the **Gabriel rule** — drop an edge if another point sits
+inside the circle having that edge as diameter. It does not work, for a reason
+worth writing down:
+
+> For an equilateral triangle the third vertex sits **0.87** of a side length
+> from the edge midpoint, against a circle radius of **0.50**. Comfortably
+> outside. So Gabriel keeps the edge.
+
+Relaxing points to be evenly spaced makes every triangle near-equilateral, so
+the prune kept **84%** of the edges and produced a hexagonal web with a degree
+histogram of 4–7. The same holds for every β-skeleton up to β = 2 — the whole
+family. **Evenly spaced points cannot make an irregular graph.** The
+irregularity has to come from the dual, not from a filter.
+
+The Voronoi construction gives what a city actually looks like: 100 junctions,
+168 roads, degrees `{3: 68, 4: 28, 5: 4}`, 68 blocks, road lengths 16–93 m,
+block areas 1950–7729 m², four to eight sides a block.
+
+### The invariant, and how it is checked
+
+Everything is periodic over `TILE`. That is not a nicety — the world tiles
+infinitely, and a network that disagreed with itself across the seam would put
+a road that stops at a wall in front of the player.
+
+Two assertions hold the whole thing up, and both are in `tests/city.test.ts`:
+
+- **Euler characteristic.** On a torus `V − E + F = 0`. Measured: 100 − 168 +
+  68 = 0. If the face walk misses a cell, double-counts one, or the contraction
+  breaks a junction, this is the number that moves. It is worth more than any
+  amount of eyeballing an SVG.
+- **Exact periodicity.** 4000 samples of `offroad(x, z)` against
+  `offroad(x + TILE, z)` and `offroad(x, z + TILE)`. Zero mismatches.
+
+There is also a test that simply asserts the city **is not a grid**: longest
+road over shortest > 3, largest block over smallest > 2.5, and fewer than 12%
+of junction angles within 5° of a right angle. It is a silly-sounding test that
+would have caught three of the four wrong turns above.
+
+### Scenery on polygons
+
+Every archetype used to take `{x, z, w, d}` and sit square to the compass.
+None of that survives. `render/blocks.ts` now works on the block **polygon**:
+
+- `inset(poly, d)` offsets every **edge** inward by `d` and intersects
+  neighbouring edges. It must not be "scale toward the centroid" — that
+  under-insets corners by about half, and it put corner buildings 4.7 m from the
+  road centreline.
+- `simplify(poly, minLen)` merges sides shorter than 11 m to their midpoint, so
+  a cell with a near-degenerate edge does not get a building 2 m wide.
+- `perimeter()` walks the inset polygon by **arc length** and lays a continuous
+  terrace along it, with a 2.4 m overlap so the corners close.
+- `boxRot`/`slabRot` place everything on the bearing of the side it belongs to.
+
+Three traps, all of which cost real time:
+
+1. **`slabRot` had always rotated the wrong way.** It mapped the along axis to
+   `(−sin a, cos a)` — the heading reflected in z — which is *identical* at
+   a = 0 and ±180 and differs by exactly 180° at ±90. Every angle in a lattice
+   is one of those four, so the bug was invisible for the entire life of the
+   grid city and appeared the instant a street ran at 23°.
+2. **`inset` used a cross product where a dot product belonged.** Intersections
+   landed kilometres away; one "block" measured 5107 m across and 383k vertices.
+3. **Blocks were built from raw circumcentres while roads used contracted
+   junctions.** Up to 16 m of disagreement — buildings standing in the road at
+   exactly the junctions the contraction had merged. Cell corners now get mapped
+   through the union-find before use.
+
+The inside-out check on `inset` is also worth a note: testing the **signed area**
+does not work, because inverting a polygon through its centre is a 180° rotation
+and preserves orientation. The check is per-vertex instead — every new vertex
+must be at least `d` inside every original edge.
+
+### Alleys, and the test that had to be thrown away
+
+The gap-between-buildings test failed four times in a row at 2.8–3.7 m against
+a 4 m rule, and each fix moved the number without fixing it. The realisation:
+once `perimeter()` lays a **continuous** terrace, the block interior is not
+reachable at all, so an interior gap of 3 m is a gap between two walls nobody
+can get between. The geometric band rule was measuring a quantity that had
+stopped meaning anything.
+
+It was replaced with what actually matters — terrace continuity, plus two
+behavioural checks: the truck can leave every point on the network, and no
+footprint overlaps the carriageway. Two archetypes needed real fixes once the
+right question was being asked (the shrine's gate posts lost their collision
+footprints, and the market's lane went from 3.8 m to 6.0 m, both because they
+could wedge the truck).
+
+### What moved off the lattice
+
+- `world/traffic.ts` — cars drive the **graph** now: `{from, to, t}` along an
+  edge, `pickNext()` weighted toward carrying straight on, footprints oriented
+  to the road.
+- `world/pedestrians.ts` — they walk each block's **pavement ring**
+  (`inset(poly, ROAD_HALF + 1.6)`) by arc length, and walk back to it after a
+  panic.
+- `game/dispatch.ts` — `Closure.alongX: boolean` became `Closure.angle: number`.
+  A closure on a lattice only ever needed to know which of two ways it lay.
+- `vehicle/collision.ts` — footprints carry an optional angle, resolved by
+  transforming into the box's frame and back out.
+- The old 9×9 lattice still exists, as `tests/helpers/lattice.ts`. Several
+  routing tests want a graph whose right answers can be worked out by hand, and
+  a grid is genuinely the best fixture for that even when it is a bad city.
+
+### Measured
+
+142 tests green. In the browser: 26 traffic cars, terrain parity within 3 mm
+over 1681 GPU-vs-CPU samples, the delivery chain cycling drops and pickups with
+the combo building, city↔pass swapping cleanly both ways, no console errors,
+and **1.46M vertices a frame against the grid city's 1.4M** — the same budget
+for a city that is now worth looking at.
+
 ## The mountain pass (29 Aug)
 
 Chris chose **a different game per place**, and this is the second place. Five
@@ -1125,14 +1277,15 @@ together, and the reason they are one method.
 
 ### Still open on the pass
 
-- **No hairpins**, as above.
-- **Nothing else is on the road.** Traffic is still lattice-bound and a pass
-  wants a different mover entirely — an oncoming van on a blind corner is the
-  obvious one, and it is exactly the kind of thing a pace note should warn you
-  about.
-- **The non-grid city is still not built.** Chris asked for both; the pass came
-  first because it needed the road network more. `render/city.ts` still
-  generates from grid arithmetic.
+- ~~**No hairpins**, as above.~~ Done — see "Hairpins, and why the road had to
+  stop being a curve".
+- **Nothing else is on the road.** Still open. Traffic drives the graph now, so
+  it *could* run here, but a pass wants a different mover — an oncoming van on a
+  blind corner is the obvious one, and exactly the kind of thing a pace note
+  should warn you about.
+- ~~**The non-grid city is still not built.**~~ Built — see "The city stops
+  being a grid". The pass came first because it needed the road network more,
+  and the network is what the city was then rebuilt on top of.
 
 ## Mario Kart drift, tyre smoke, traffic off (29 Aug)
 
@@ -1700,7 +1853,8 @@ caching, the phone performance pass and anything Steam-shaped are not.*
 ## Files
 
 - `src/` — the game. See the module map under "Current state" above.
-- `tests/` — 129 headless tests over the rules, the physics, collision and the pass.
+- `tests/` — 142 headless tests over the rules, the physics, collision, the
+  city plan and the pass.
 - `bent-city.html` — the original single-file prototype, kept as the historical
   record of where the bend came from. **It is no longer the game** and does not
   receive changes; open it to see what v0.7 looked like, not to play.

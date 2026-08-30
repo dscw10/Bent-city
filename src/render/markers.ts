@@ -118,13 +118,13 @@ export function drawRival(
  * A road closure. Bars across the carriageway in the near field, plus a flat X
  * that stays readable once everything is lying down on the map.
  */
-export function drawClosure(b: Builder, x: number, z: number, alongX: boolean): void {
+export function drawClosure(b: Builder, x: number, z: number, angle: number): void {
   const col = C.hazard;
   const w = 15;
+  const s = Math.sin(angle), c = Math.cos(angle);
   for (let i = -1; i <= 1; i++) {
     const off = i * 2.6;
-    if (alongX) b.slab(x + off, z, 1.6, w, 0.26, col, 2);
-    else b.slab(x, z + off, w, 1.6, 0.26, col, 2);
+    b.slabRot(x + s * off, z + c * off, w, 1.6, 0.26, angle, col, 2);
   }
   // The X reads at any map scale and at any orientation.
   b.slabRot(x, z, 2.2, 20, 0.24, Math.PI / 4, col, 1);

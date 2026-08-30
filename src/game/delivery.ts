@@ -5,7 +5,6 @@ import type { Rival } from '../world/rivals';
 import { Traffic } from '../world/traffic';
 import { Pedestrians } from '../world/pedestrians';
 import type { Point } from '../world/network';
-import { PITCH } from '../core/city-layout';
 import { wrapDist, wrapDelta, nearCopy } from '../core/place';
 import { C } from '../core/palette';
 import { clamp } from '../core/math';
@@ -33,6 +32,14 @@ import { noEvents } from './rules';
  * here: simultaneous orders with countdowns, a three-crate capacity, and
  * closures. See the long note at the top of game/dispatch.ts.
  */
+
+/**
+ * How far from a junction the painted turn arrow appears. It used to be 1.3
+ * block pitches; the city has no single pitch any more, and 75 metres is what
+ * that came to — far enough to be the decision you are about to make, near
+ * enough that the one after it is still the map's job.
+ */
+const TURN_ARROW_RANGE = 75;
 
 const TRAFFIC_COUNT = 26;
 const PEDESTRIAN_COUNT = 44;
@@ -102,7 +109,7 @@ export class DeliveryRules implements Rules {
     this.dispatch.start(mode, net, car.x, car.z);
     this.couriers.start(this.dispatch, net, mode.rivals);
     this.traffic.setClosures(this.dispatch.closedEdges);
-    this.traffic.start(save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
+    this.traffic.start(net, save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
     this.pedestrians.start(save.settings.pedestrians ? PEDESTRIAN_COUNT : 0, car.x, car.z);
 
     this.route = [];
@@ -111,7 +118,7 @@ export class DeliveryRules implements Rules {
   }
 
   refresh(car: Car): void {
-    this.traffic.start(save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
+    this.traffic.start(this.ctx.network, save.settings.traffic ? TRAFFIC_COUNT : 0, car.x, car.z);
     this.pedestrians.start(save.settings.pedestrians ? PEDESTRIAN_COUNT : 0, car.x, car.z);
   }
 
@@ -308,7 +315,7 @@ export class DeliveryRules implements Rules {
       drawRival(b, nx(r.x), nz(r.z), r.heading, r.speed01);
     }
     for (const c of this.dispatch.closures) {
-      drawClosure(b, nx(c.x), nz(c.z), c.alongX);
+      drawClosure(b, nx(c.x), nz(c.z), c.angle);
     }
   }
 
@@ -371,7 +378,7 @@ export class DeliveryRules implements Rules {
     // Only paint it once the junction is close enough to be the decision you
     // are about to make, and far enough that the arrow is not sitting on the
     // camera. Beyond this range the turn is the map's job, not the road's.
-    if (range > PITCH * 1.3 || range < 27) return;
+    if (range > TURN_ARROW_RANGE || range < 27) return;
 
     const inA = Math.atan2(dx, dz);
     const outA = Math.atan2(next[0] - at[0], next[1] - at[1]);

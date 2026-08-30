@@ -2,17 +2,18 @@ import * as THREE from 'three';
 import { Builder } from './builder';
 import { C } from '../core/palette';
 import { makeRandom } from '../core/math';
-import { BUILDERS } from './blocks';
+import { BUILDERS, inset, makePlot } from './blocks';
 import type { BlockKind } from './blocks';
-import { GRID, PITCH, TILE, TILES_ACROSS, nodePos } from '../core/city-layout';
+import { TILE, TILES_ACROSS } from '../core/city-layout';
+import { cityPlan, ROAD_HALF } from '../world/networks/organic';
 import { bentMat, roadMat, addBent } from './materials';
 import type { Block, Chunk, Scenery } from './scenery';
 
 export type { BlockKind } from './blocks';
 export type { Block } from './scenery';
 
-/** What occupies each block, indexed [i][j]. Kept for the dev overlay. */
-export interface CityMeta { kinds: BlockKind[][] }
+/** What occupies each block. Kept for the dev overlay. */
+export interface CityMeta { kinds: BlockKind[] }
 
 const CITY_SEED = 20260826;
 
@@ -48,44 +49,45 @@ function pickKind(r: number): BlockKind {
  * 5×5 rather than 3×3 because map compression can see much further than the old
  * fog distance allowed. This is the build's main performance risk — 25 draws —
  * but they all share one buffer, so it is 25 draw calls rather than 25 uploads.
+ *
+ * The city is no longer a lattice; it comes off the organic plan in
+ * world/networks/organic.ts. Two consequences worth knowing here:
+ *
+ * - A BLOCK IS A POLYGON. Each one is inset off the carriageway to leave the
+ *   pavement, then handed to an archetype as a `Plot` with its own frame.
+ * - GEOMETRY MAY POKE OUT OF THE TILE, because a block that straddles the seam
+ *   is centred on whichever side its centroid falls. That is not a problem: the
+ *   tile is drawn 5×5, so what pokes out of one copy is what pokes into the
+ *   next, and it lands in the right place on its own. The culler's margin has
+ *   to cover the overhang, which is at most half a block.
  */
 export function buildCity(scene: THREE.Scene): Scenery {
   const b = new Builder();
   const rnd = makeRandom(CITY_SEED);
+  const plan = cityPlan();
   const blocks: Block[] = [];
-  const kinds: BlockKind[][] = Array.from({ length: GRID }, () => new Array<BlockKind>(GRID));
+  const kinds: BlockKind[] = [];
 
-  // Lane dashes. These are what make the plan-view region read as a map rather
-  // than as a grey grid — without them the roads have no direction.
-  //
-  // Loops run to GRID (not GRID-1) so the pattern is continuous across the tile
-  // join. An off-by-one here shows up as a visible seam you cannot un-see.
-  for (let i = 0; i < GRID; i++) {
-    for (let j = 0; j < GRID; j++) {
-      for (let k = 0; k < 4; k++) {
-        const t = nodePos(j) + PITCH * (k + 0.5) / 4;
-        b.slab(nodePos(i), t, 0.7, 3.4, 0.02, C.dash, 1);
-        b.slab(t, nodePos(i), 3.4, 0.7, 0.02, C.dash, 1);
-      }
-    }
-  }
+  lanes(b, plan);
 
-  for (let i = 0; i < GRID; i++) {
-    for (let j = 0; j < GRID; j++) {
-      const cx = nodePos(i) + PITCH / 2;
-      const cz = nodePos(j) + PITCH / 2;
-      const kind = pickKind(rnd());
-      kinds[i][j] = kind;
-      BUILDERS[kind]({ b, cx, cz, rnd, push: block => blocks.push(block) });
-    }
+  for (const face of plan.faces) {
+    /* Inset by the carriageway plus a pavement. The pavement is what makes
+       cutting a corner a shortcut with a price rather than a wall. */
+    const outline = inset(face.poly, ROAD_HALF + 2.5);
+    const plot = makePlot(outline);
+    if (!plot || plot.area < 200) { kinds.push('lot'); continue; }
+
+    const kind = pickKind(rnd());
+    kinds.push(kind);
+    BUILDERS[kind]({ b, plot, rnd, push: block => blocks.push(block) });
   }
 
   const geo = b.toGeometry();
   const half = (TILES_ACROSS - 1) / 2;
   const chunks: Chunk[] = [];
-  // Margin on the bounds: buildings are buried deep and their skirts reach
-  // outside the tile they belong to.
-  const M = 60;
+  // Margin on the bounds: buildings are buried deep, their skirts reach outside
+  // the block, and a block that straddles the seam overhangs the tile.
+  const M = 90;
   for (let ox = -half; ox <= half; ox++) {
     for (let oz = -half; oz <= half; oz++) {
       const mesh = new THREE.Mesh(geo, bentMat);
@@ -100,6 +102,38 @@ export function buildCity(scene: THREE.Scene): Scenery {
   }
 
   return { blocks, chunks, meta: { kinds } };
+}
+
+/**
+ * Lane markings, drawn down the middle of every road.
+ *
+ * These are what make the plan-view region read as a map rather than as a grey
+ * shape — without them the roads have no direction and an organic city is just
+ * a scatter of blocks. They matter more here than they did on the lattice,
+ * because a grid at least had its own right angles to read.
+ *
+ * Drawn per EDGE, and every edge exactly once, so nothing doubles up at a
+ * junction and nothing is missed across the seam.
+ */
+function lanes(b: Builder, plan: ReturnType<typeof cityPlan>): void {
+  const net = plan.network;
+  for (let i = 0; i < net.nodes.length; i++) {
+    const a = net.nodes[i];
+    for (const j of a.links) {
+      if (j <= i) continue;
+      const dx = net.delta(net.nodes[j].x, a.x);
+      const dz = net.delta(net.nodes[j].z, a.z);
+      const len = Math.hypot(dx, dz);
+      if (len < 1) continue;
+      const ang = Math.atan2(dx, dz);
+      // Dashes stop short of each junction, so the box is left clear.
+      const clear = 9;
+      for (let s = clear; s < len - clear; s += 9) {
+        const t = (s + 2) / len;
+        b.slabRot(a.x + dx * t, a.z + dz * t, 0.7, 3.6, 0.02, ang, C.dash, 1);
+      }
+    }
+  }
 }
 
 /**

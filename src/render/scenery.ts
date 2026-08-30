@@ -13,8 +13,15 @@ import type * as THREE from 'three';
  * needing to know how the level laid itself out.
  */
 
-/** A collision footprint, axis-aligned, in world coordinates. */
-export interface Block { x: number; z: number; w: number; d: number }
+/**
+ * A collision footprint in world coordinates.
+ *
+ * `a` rotates it about its centre. Axis-aligned footprints simply leave it out,
+ * which is every footprint the mountain pass makes and every one the city made
+ * before its streets stopped meeting at right angles — a building on a street
+ * at 23 degrees has to sit on the street, not square to the compass.
+ */
+export interface Block { x: number; z: number; w: number; d: number; a?: number }
 
 /** One drawn piece of static scenery and the ground it covers. */
 export interface Chunk {

@@ -1,14 +1,16 @@
-import { PITCH, ROADW, BLOCK } from '../core/city-layout';
 import { wrap, wrapDelta, wrapDist } from '../core/place';
 import type { Builder } from '../render/builder';
 import type { RGB } from '../core/palette';
 import { shade } from '../core/palette';
 import { approachAngle } from '../core/math';
 import { P } from '../core/config';
+import { cityPlan, ROAD_HALF } from './networks/organic';
+import { pavementRing } from '../render/blocks';
+import type { Point } from './network';
 
 /**
- * Pedestrians. They walk the pavement ring around a block, and they scatter
- * when the truck gets close.
+ * Pedestrians. They walk the pavement round a block, and they scatter when the
+ * truck gets close.
  *
  * Two reasons they earn their place:
  *
@@ -21,6 +23,12 @@ import { P } from '../core/config';
  *
  * They are blocks of colour and they run away. Clipping one costs you your
  * combo — enough to make you lift, not enough to end a run.
+ *
+ * WALKING A RING, NOT A GRID. The lattice version worked out which block you
+ * were in with two modulos and pushed you to the nearer edge of a square
+ * pavement band. A block is a polygon now, so a pedestrian holds the block it
+ * belongs to and how far round it has walked — which is both simpler and the
+ * only version that can follow a kerb that bends.
  */
 const NEAR = 16;          // when they notice you
 const HIT = 1.9;          // when you have clipped one
@@ -28,6 +36,8 @@ const SPAWN_MIN = 25;
 const SPAWN_MAX = 110;
 const DESPAWN = 170;
 const HEAD: RGB = [0.30, 0.32, 0.35];
+/** How far inside the kerb they walk. */
+const PAVEMENT = ROAD_HALF + 1.6;
 
 export interface Pedestrian {
   x: number;
@@ -39,6 +49,51 @@ export interface Pedestrian {
   bob: number;
   col: RGB;
   h: number;
+  /** Which block's pavement they belong to, and which way round they walk. */
+  ring: number;
+  along: number;
+  way: 1 | -1;
+}
+
+/** The pavement outline of every block, walked once and kept. */
+let rings: Array<{ poly: Point[]; seg: number[]; total: number }> | null = null;
+
+function ringsOf() {
+  if (rings) return rings;
+  rings = [];
+  for (const f of cityPlan().faces) {
+    const poly = pavementRing(f.poly, PAVEMENT);
+    if (poly.length < 3) continue;
+    const seg: number[] = [];
+    let total = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      seg.push(len);
+      total += len;
+    }
+    if (total > 20) rings.push({ poly, seg, total });
+  }
+  return rings;
+}
+
+/** Where you are after walking `s` metres round block `r`, and which way. */
+function onRing(r: number, s: number): { x: number; z: number; heading: number } {
+  const ring = ringsOf()[r];
+  let t = ((s % ring.total) + ring.total) % ring.total;
+  for (let i = 0; i < ring.poly.length; i++) {
+    if (t <= ring.seg[i]) {
+      const a = ring.poly[i], b = ring.poly[(i + 1) % ring.poly.length];
+      const u = ring.seg[i] > 0 ? t / ring.seg[i] : 0;
+      return {
+        x: a[0] + (b[0] - a[0]) * u,
+        z: a[1] + (b[1] - a[1]) * u,
+        heading: Math.atan2(b[0] - a[0], b[1] - a[1])
+      };
+    }
+    t -= ring.seg[i];
+  }
+  return { x: ring.poly[0][0], z: ring.poly[0][1], heading: 0 };
 }
 
 export class Pedestrians {
@@ -62,19 +117,27 @@ export class Pedestrians {
         // Straight away from the truck, which reads as alarm rather than as
         // pathfinding — and, usefully, gets them off your line.
         p.heading = approachAngle(p.heading, Math.atan2(dx, dz), dt, 0.12);
-      } else if (p.panic > 0) {
-        p.panic -= dt;
+        p.x = wrap(p.x + Math.sin(p.heading) * p.speed * 3.1 * dt);
+        p.z = wrap(p.z + Math.cos(p.heading) * p.speed * 3.1 * dt);
       } else {
-        // Idle wander, with a gentle bias back toward the pavement ring.
-        p.heading += (Math.random() - 0.5) * dt * 1.6;
-        const kerb = this.kerbBias(p.x, p.z);
-        if (kerb !== null) p.heading = approachAngle(p.heading, kerb, dt, 0.9);
+        if (p.panic > 0) {
+          p.panic -= dt;
+          /* Walking back to the kerb after a fright, rather than snapping to
+             it. Panic pushes them off the ring and this is what puts them
+             back, so the two never fight over the same frame. */
+          const home = onRing(p.ring, p.along);
+          p.heading = approachAngle(p.heading, Math.atan2(home.x - p.x, home.z - p.z), dt, 0.5);
+          p.x = wrap(p.x + Math.sin(p.heading) * p.speed * dt);
+          p.z = wrap(p.z + Math.cos(p.heading) * p.speed * dt);
+        } else {
+          p.along += p.way * p.speed * dt;
+          const at = onRing(p.ring, p.along);
+          p.x = wrap(at.x);
+          p.z = wrap(at.z);
+          p.heading = p.way > 0 ? at.heading : at.heading + Math.PI;
+        }
       }
-
-      const v = p.panic > 0 ? p.speed * 3.1 : p.speed;
-      p.x = wrap(p.x + Math.sin(p.heading) * v * dt);
-      p.z = wrap(p.z + Math.cos(p.heading) * v * dt);
-      p.bob += v * dt * 3.4;
+      p.bob += p.speed * dt * 3.4;
 
       if (d < HIT && Math.abs(carSpeed) > 4) {
         hits++;
@@ -102,55 +165,33 @@ export class Pedestrians {
   }
 
   private spawn(carX: number, carZ: number): Pedestrian {
+    const all = ringsOf();
     const ang = Math.random() * Math.PI * 2;
     const r = SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
-    // Land them on the pavement ring of whichever block they fell into, so
-    // nobody spawns standing in the middle of a carriageway.
-    const [x, z] = this.snapToPavement(carX + Math.sin(ang) * r, carZ + Math.cos(ang) * r);
+    const tx = carX + Math.sin(ang) * r, tz = carZ + Math.cos(ang) * r;
+
+    // Whichever block's pavement is nearest where they were asked for.
+    let ring = 0, best = Infinity;
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i].poly[0];
+      const d = Math.hypot(wrapDelta(p[0], tx), wrapDelta(p[1], tz));
+      if (d < best) { best = d; ring = i; }
+    }
+
+    const along = Math.random() * all[ring].total;
+    const at = onRing(ring, along);
     const t = 0.30 + Math.random() * 0.42;
     return {
-      x, z,
-      heading: Math.random() * Math.PI * 2,
+      x: wrap(at.x), z: wrap(at.z),
+      heading: at.heading,
       speed: 1.1 + Math.random() * 0.7,
       panic: 0,
       bob: Math.random() * 6,
       col: [t, t * 1.03, t * 1.08],
-      h: 1.6 + Math.random() * 0.24
+      h: 1.6 + Math.random() * 0.24,
+      ring,
+      along,
+      way: Math.random() < 0.5 ? 1 : -1
     };
-  }
-
-  /** Nudge a point onto the pavement band just inside a block's edge. */
-  private snapToPavement(x: number, z: number): [number, number] {
-    const lx = wrap(x) % PITCH, lz = wrap(z) % PITCH;
-    const inner = ROADW / 2 + 2.2;
-    const outer = PITCH - ROADW / 2 - 2.2;
-    const clampBand = (v: number) => {
-      if (v < inner) return inner;
-      if (v > outer) return outer;
-      // Inside the block: push to whichever edge of the pavement ring is nearer.
-      const mid = PITCH / 2;
-      return v < mid ? inner : outer;
-    };
-    // Only one axis is pushed, so they end up on an edge rather than a corner.
-    if (Math.random() < 0.5) return [wrap(x) - lx + clampBand(lx), wrap(z)];
-    return [wrap(x), wrap(z) - lz + clampBand(lz)];
-  }
-
-  /**
-   * If a pedestrian has wandered into the middle of a block or out onto the
-   * road, return a heading that takes them back toward the pavement.
-   */
-  private kerbBias(x: number, z: number): number | null {
-    const lx = wrap(x) % PITCH, lz = wrap(z) % PITCH;
-    const onRoad = lx < ROADW / 2 || lx > PITCH - ROADW / 2 ||
-                   lz < ROADW / 2 || lz > PITCH - ROADW / 2;
-    const deepInside = lx > ROADW / 2 + BLOCK * 0.28 && lx < PITCH - ROADW / 2 - BLOCK * 0.28 &&
-                       lz > ROADW / 2 + BLOCK * 0.28 && lz < PITCH - ROADW / 2 - BLOCK * 0.28;
-    if (!onRoad && !deepInside) return null;
-
-    const cx = wrap(x) - lx + PITCH / 2;
-    const cz = wrap(z) - lz + PITCH / 2;
-    const toCentre = Math.atan2(cx - wrap(x), cz - wrap(z));
-    return onRoad ? toCentre : toCentre + Math.PI;
   }
 }

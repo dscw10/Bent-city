@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run dev` | Vite dev server with hot reload |
 | `npm run build` | Typecheck, then build a static site into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally |
-| `npm test` | 129 headless tests over the rules, the physics, collision and the pass |
+| `npm test` | 142 headless tests over the rules, the physics, collision, the city plan and the pass |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run check` | Typecheck and tests — run this before committing |
 
@@ -187,6 +187,14 @@ three, and they compound:
 Because block interiors are drivable, a closure does not stop you — it pushes
 you onto the slow pavement cut-through. A cost, not a wall.
 
+There is a fourth, and it only arrived once the city stopped being a grid:
+**the streets themselves carry information.** On a lattice every route with the
+same number of turns is the same length, so a map of it tells you nothing but
+where the drops are. The city is an irregular Voronoi network now — blocks
+differ in size and shape, a long diagonal beats the same displacement in steps,
+and a junction is a place with a shape you can recognise. That is a map worth
+looking at, which was the argument for the fold all along.
+
 A rule falls out of all this: **anything that must be legible in both regions
 needs a component built for each.** An objective has a tall pillar for the
 street and a flat ring for the map. A closure has bars across the carriageway
@@ -299,7 +307,8 @@ src/
   render/   bend shader, geometry builder, city, pass scenery, block
             archetypes, materials, marker batching, chase camera, projection
   vehicle/  raycast suspension, collision, truck mesh
-  world/    road network + its generators, rivals, traffic, pedestrians
+  world/    road network + its generators (organic city, pass), rivals,
+            traffic, pedestrians
   game/     levels, rules (delivery / pass run), dispatch, pace notes, modes,
             run shell, persistence
   audio/    bus graph, engine, world sound, music, one-shots
@@ -337,6 +346,16 @@ Kept short here; the full list with the stories is in `context.md`.
   come from where a bent building *looks* like it is, that is the bug.
 - **Any full-screen overlay needs `pointer-events: none`,** or it silently eats
   every tap on the page.
+- **A bearing is `(sin a, cos a)`, everywhere.** `slabRot` mapped its along axis
+  to `(−sin a, cos a)` — the heading reflected in z — for the whole life of the
+  grid city, and nobody noticed, because those two agree at 0° and ±180° and
+  differ by exactly 180° at ±90°, and a lattice has no other angles. It broke
+  the instant a street ran at 23°.
+- **Inset a polygon by offsetting its EDGES,** not by scaling toward the
+  centroid. Scaling under-insets corners by roughly half, which put corner
+  buildings 4.7 m from the road centreline. And do not check the result with a
+  signed area: inverting a polygon through its centre is a 180° rotation, which
+  preserves orientation. Check every new vertex is inside every original edge.
 - **Quad winding decides the lighting.** `Builder.quad` derives the face normal
   from the corner order, and the materials are double-sided — so a strip wound
   the wrong way still draws, just lit from underneath. The pass's whole valley

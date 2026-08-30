@@ -10,7 +10,8 @@ import { findCorners, gradeFor, noteText, PASS_DISTANCE } from '../src/game/pace
 import { CHECKPOINTS, gradeAt, clockText } from '../src/game/pass-run';
 import { setTerrain, terrainAt, slopeAt } from '../src/core/terrain';
 import { setPlace, wrapDelta, wrap, PLACE } from '../src/core/place';
-import { TILE, onOffroad } from '../src/core/city-layout';
+import { TILE } from '../src/core/city-layout';
+import { cityPlan } from '../src/world/networks/organic';
 import { V, makeCar, resetCar, stepVehicle } from '../src/vehicle/vehicle';
 
 /**
@@ -27,7 +28,7 @@ function usePass(): void {
 }
 function useCity(): void {
   setTerrain('city');
-  setPlace({ wrapSize: TILE, offroad: onOffroad });
+  setPlace({ wrapSize: TILE, offroad: cityPlan().offroad });
 }
 
 describe('the track', () => {

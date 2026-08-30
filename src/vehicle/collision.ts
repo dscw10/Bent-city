@@ -1,4 +1,4 @@
-import type { Block } from '../render/city';
+import type { Block } from '../render/scenery';
 import type { Car } from './vehicle';
 import { wrapDelta, wrap } from '../core/place';
 import { clamp } from '../core/math';
@@ -48,9 +48,24 @@ export function collideBlocks(car: Car, blocks: Block[]): number {
   let nx = 0, nz = 0;
 
   for (const b of blocks) {
-    const dx = wrapDelta(car.x, b.x);
-    const dz = wrapDelta(car.z, b.z);
+    let dx = wrapDelta(car.x, b.x);
+    let dz = wrapDelta(car.z, b.z);
     const hw = b.w / 2, hd = b.d / 2;
+
+    /* An oriented footprint is the same problem in the box's own frame: turn
+       the offset into it, solve exactly as before, and turn the resulting
+       normal back out. Everything below — the rounded corners, the
+       deepest-overlap rule, the reflection — is untouched, which is the point
+       of doing it this way rather than writing a second collision routine.
+       `a` is a bearing and matches Builder.boxRot exactly: `w` is the extent
+       across it, `d` the extent along it. */
+    const ang = b.a ?? 0;
+    const ca = ang ? Math.cos(ang) : 1, sa = ang ? Math.sin(ang) : 0;
+    if (ang) {
+      const rx = dx * ca - dz * sa;
+      const rz = dx * sa + dz * ca;
+      dx = rx; dz = rz;
+    }
 
     // Closest point on the (unpadded) box to the truck's centre.
     const ox = dx - clamp(dx, -hw, hw);
@@ -72,7 +87,12 @@ export function collideBlocks(car: Car, blocks: Block[]): number {
       else { cnx = 0; cnz = Math.sign(dz || 1); cd = pz + PAD; }
     }
 
-    if (cd > depth) { depth = cd; nx = cnx; nz = cnz; }
+    if (cd > depth) {
+      depth = cd;
+      // Back out of the box's frame.
+      nx = ang ? cnx * ca + cnz * sa : cnx;
+      nz = ang ? -cnx * sa + cnz * ca : cnz;
+    }
   }
 
   if (depth <= 0) return 0;

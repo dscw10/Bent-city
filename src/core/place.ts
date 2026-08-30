@@ -20,7 +20,7 @@
  * because `stepVehicle` runs three times a frame per vehicle and the answer is
  * the same for all of them. Levels set it once, in `use()`.
  */
-import { TILE, onOffroad } from './city-layout';
+import { TILE } from './city-layout';
 
 export interface Place {
   /** Repeat distance of the world, or 0 for a place with edges. */
@@ -29,8 +29,13 @@ export interface Place {
   offroad(x: number, z: number): boolean;
 }
 
-/** The city is the default, so anything that never calls setPlace still works. */
-export const PLACE: Place = { wrapSize: TILE, offroad: onOffroad };
+/**
+ * The default. A level always calls setPlace before anything drives, so this
+ * only has to be harmless — and "nowhere is off the road" is the harmless one.
+ * It used to be the lattice's own grid arithmetic, which stopped existing when
+ * the city stopped being a lattice.
+ */
+export const PLACE: Place = { wrapSize: TILE, offroad: () => false };
 
 export function setPlace(p: Place): void {
   PLACE.wrapSize = p.wrapSize;

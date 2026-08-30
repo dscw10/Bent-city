@@ -1,6 +1,5 @@
 import { P } from '../core/config';
 import { terrainAt, slopeAt } from '../core/terrain';
-import { nodePos } from '../core/city-layout';
 import { wrap, PLACE } from '../core/place';
 import { clamp, lerp, shortAngle } from '../core/math';
 
@@ -348,7 +347,7 @@ export interface Car {
 
 export function makeCar(): Car {
   return {
-    x: nodePos(1), z: nodePos(1), y: V.comH, a: 0,
+    x: 0, z: 0, y: V.comH, a: 0,
     vx: 0, vy: 0, vz: 0, v: 0,
     yaw: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
     load: [0, 0, 0, 0], wheelY: [0, 0, 0, 0],
